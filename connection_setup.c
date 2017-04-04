@@ -23,7 +23,7 @@
 #include "client.h"
 #include "rdtsc.h"
 
-#define OPERATOR WRITE_OPERATOR 
+#define OPERATOR READ_OPERATOR 
 #define DUPLICATE_COPIES 1
 
 #define CPUGHZ  2.0f
@@ -54,7 +54,7 @@ int duration=0;
 int num_threads=1;
 int queue_depth=16;
 
-int is_sync=1;
+int is_sync=0;
 int rate_limit_mode=1;
 long long unsigned syntime;
 
@@ -81,7 +81,7 @@ sigalarm_handler (int signo)
 void parseOpt(int argc, char **argv){
 	int c; 
 	int i=0;	
-	while ((c = getopt(argc, argv, "s:m:n:c:b:h:p:e:M:S:R:d:")) != -1) {
+	while ((c = getopt(argc, argv, "s:m:n:c:b:h:p:e:d:M:S:R:")) != -1) {
 		switch (c)
 		{
 			case 'm':
@@ -166,7 +166,6 @@ static void * latency_measure(void * arg){
 	int wait_for_acks_ret;
 	int index = (int) arg;
 
-//	printf("index %d\n",index);
 	bindingCPU(index);
 	struct context *s_ctx=multi_ctx[index];
 	struct connection *conn = s_ctx->conn;
@@ -194,19 +193,8 @@ static void * latency_measure(void * arg){
 
 		for(ack_i=0; ack_i< k; ack_i++){
 			if (wc[ack_i].status != IBV_WC_SUCCESS){
-				fprintf(stderr," wrong wc->status: %s, opcode %s, %d\n",
-					ibv_wc_status_str(wc[ack_i].status), ibv_wc_opcode_str(wc[ack_i].exp_opcode), i);
-				int j=0;
-				for(j=0;j<MAX_TIMESTAMP_SIZE;j++){
-					if(lats[index%num_threads][j] == 0){
-						break;
-					}
-					printf("- [%d, %"PRIu64"]\n", index, lats[index%num_threads][j]);
-				}	
-
-				exit(-1);
-				//break;
-				//return;	
+				fprintf(stderr,"unsuccessful connection\n");	
+				break;	
 			}
 			uint64_t cur_nic_ts;
 			if(wc[ack_i].exp_wc_flags & IBV_EXP_WC_WITH_TIMESTAMP){
@@ -214,7 +202,7 @@ static void * latency_measure(void * arg){
 			}
 
 			uint64_t basertt= (cur_nic_ts - start_ts)/NIC_CLOCK_MHZ;
-			//printf("baseRTT %"PRIu64", opcode: %s\n", basertt, ibv_wc_opcode_str(wc[ack_i].exp_opcode));
+			//printf("baseRTT %"PRIu64"\n", basertt);
 			lats[index%num_threads][i]=basertt;
 			i++;
 		}
@@ -229,71 +217,74 @@ static void * incast(void * arg){
 	int wait_for_acks_ret;
 	int index = (int) arg;
 
-	int dur= 0;
 	bindingCPU(index);
 	struct context *s_ctx=multi_ctx[index];
 	struct connection *conn = s_ctx->conn;
 	//s_ctx->srv_state->index = index;
 	//s_ctx->srv_state->sl = index%num_threads;
+	struct timespec start, end;
+	int dur= 0;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 
-/*	long long unsigned st = start.tv_sec*BILLION + start.tv_nsec;
+	long long unsigned st = start.tv_sec*BILLION + start.tv_nsec;
 	if(is_sync == 1){
 		while(st < syntime){
 			clock_gettime(CLOCK_MONOTONIC, &start);
 			st = start.tv_sec*BILLION + start.tv_nsec;
 		}
-	}*/
-//	if(duration > 0){	
+	}
+	if(duration > 0){	
 	//	clock_gettime(CLOCK_MONOTONIC, &end);
 	//	dur =end.tv_sec - start.tv_sec;
 		
+		/*if(sigsetjmp(jmp_alarm[index],1)!=0){
+			printf("jmp buf @index: %d\n", index);
+			goto end_sending;
+		}
+	//	if(index == 0)
+	//		alarm(duration);
+		struct itimerval timer;
+		timer.it_interval.tv_sec = 0;
+		timer.it_interval.tv_usec = 0;
+		timer.it_value.tv_sec = duration;// (ivl / USEC_IN_SEC);
+		timer.it_value.tv_usec = 0;//(ivl % USEC_IN_SEC);
+		setitimer(ITIMER_REAL, &timer, 0);*/
 
-//	}
+	}
 	//sleep(30);
-	int k;
-	struct ibv_exp_wc wc;
-	do{
-	
-		k = ibv_exp_poll_cq(s_ctx->cq, 1, &wc, sizeof(wc));
-
-	}while(k<=0);
- 	struct timespec start, end;
-	clock_gettime(CLOCK_MONOTONIC, &start);
-
 	//printf("start sending %d\n", index);
+
+
+	int k;
+
 	//printf("sending @index %d\n", index);
 	while(conn->num_sendcount < conn->num_requests ||dur < duration || conn->num_completions < conn->num_requests){
 		while((conn->num_sendcount < conn->num_requests ||dur < duration)
 				&& conn->num_sendcount- conn->num_completions < queue_depth ){
-			//if(conn->num_sendcount < conn->num_requests -1)
-				wait_for_acks_ret = on_write_read(s_ctx,conn,1, OPERATOR, COMMON_ROCE);
-			//else
-			//	on_write_read(s_ctx,conn,1, WRITE_IMM_OPERATOR, COMMON_ROCE);
-
+			wait_for_acks_ret = on_write_read(s_ctx,conn,1, OPERATOR, COMMON_ROCE);
 			conn->num_sendcount++;
 		}
 		k = poll_send_cq(s_ctx);
 		if(k==0)
-		 	break;	
+			goto end_sending;
 		else
 			conn->num_completions +=k;
 	}
- 	clock_gettime(CLOCK_MONOTONIC, &end);
+  
+	
+end_sending:
+	clock_gettime(CLOCK_MONOTONIC, &end);
 
 	long long unsigned diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-	long unsigned data = (long unsigned)conn->num_completions*conn->send_message_size;
+	long unsigned data = (long unsigned)conn->num_sendcount*conn->send_message_size;
 
 	//printf("data %llu, %llu\n", conn->num_sendcount, conn->send_message_size);
 	double tput = data*8.0/diff;
 	double tot_time = (double)diff/BILLION;
 	//printf("throughput @ thread %d time %llu ns, size %llu bits, tput %f Gb/s\n", index, diff, data, tput);
-	conn->send_message_size = 1024;
-	conn->num_sendcount = 0;
-	snprintf(conn->send_region, conn->send_message_size,"- [WRITE_UC, %.9g, %lu, %.9g, 1]\n", tot_time, data, tput);
-	printf("%.1024s", conn->send_region);
-	//usleep(100);	
-	//on_write_read(s_ctx,conn,1, WRITE_IMM_OPERATOR, COMMON_ROCE);
-	on_send(conn,1);
+	printf("- [%.9g, %lu, %.9g, 1]\n", tot_time, data, tput);
+
+
 }
 
 int poll_send_cq(struct context *ctx)
@@ -327,16 +318,6 @@ int poll_send_cq(struct context *ctx)
 	return k;
 }
 
-void * run_tcp_server(void *arg){
-	int index = (int) arg;
-
-	bindingCPU(index);
-	struct context *s_ctx=multi_ctx[index];
-	struct connection *conn = s_ctx->conn;
-
-	run_server(portno+index, conn, s_ctx->pd, index%8);				
-
-}
 int main(int argc, char **argv)
 {
 	parseOpt(argc,argv); 
@@ -353,7 +334,7 @@ int main(int argc, char **argv)
 	memset(lats, 0 ,sizeof(lats));
 	int index;
 	struct context *s_ctx;
-	for(index=0;index<(num_threads+num_threads);index++){
+	for(index=0;index<(num_threads);index++){
 		s_ctx = NULL;
 		s_ctx = init_ctx(ib_dev,s_ctx);
 		multi_ctx[index] = s_ctx;		
@@ -361,10 +342,7 @@ int main(int argc, char **argv)
 		struct connection *conn= s_ctx->conn;
 		conn->send_message_size = send_message_size;
 		conn->num_requests = num_send_request;
-		if(index == index%num_threads)
-			conn->send_transport = UC_TRANSPORT;
-		else
-			conn->send_transport = RC_TRANSPORT;
+		conn->send_transport = RC_TRANSPORT;
 		conn->signal_all = signaled;
 		conn->window_size = window_size;
 		conn->isClient= is_client;
@@ -381,7 +359,7 @@ int main(int argc, char **argv)
 
 		modify_qp_to_init(conn);
 		//setting the memory area
-		set_memory(conn, s_ctx, OPERATOR, 2*index+REQ_AREA_SHM_KEY);
+		set_memory(conn, s_ctx, OPERATOR,2*index+REQ_AREA_SHM_KEY);
 		/*	int blocks = RECV_BUFFER_SIZE/send_message_size;
 			int i=0;
 			for(i=0;i<blocks;i++){
@@ -395,14 +373,8 @@ int main(int argc, char **argv)
 		}
 		}*/
 
-		post_receives_comm(conn);
-		if(conn->isClient == 0){
-			memset(conn->send_region, 'a'+1, RECV_BUFFER_SIZE);
-		}else
-			memset(conn->recv_region, 'q', RECV_BUFFER_SIZE);
-//		printf("recv_region %c\n",conn->recv_region[0]);
 		int index_i = index% num_threads;
-		if(conn->isClient == 1 ){   
+		if(conn->isClient ){   
 			//printf("server %s, portno %d\n", hosts[index_i], portno+index); 
 			if(index == index_i){
 				run_client(portno,hosts[index],conn);
@@ -418,12 +390,18 @@ int main(int argc, char **argv)
 				}
 	
 			}
-	
+			//if(OPERATOR == READ_OPERATOR  && conn->signal_all == 0)
+			//	TEST_NZ(pthread_create(&s_ctx->write_poller_thread, NULL, write_cq, s_ctx->conn));
+			//TEST_NZ(pthread_create(&s_ctx->throughput_timer_thread, NULL, throughput_timer, s_ctx->conn));
+			//sleep(1);	
+			//init_rtt();
+			//exit(0);	
+			//reply_operation(s_ctx->conn, OPERATOR);   
+		
 		}else{
 			//printf("portno %d\n", portno+index);
-			pthread_t temp_server;
 			if(index == index_i){
-				if(pthread_create(&temp_server, NULL, run_tcp_server, (void*)index)!= 0)
+				if(pthread_create(&server_thread[index/2], NULL, run_rone_server, (void*)index)!= 0)
 					die("main(): Failed to create server thread .");	
 
 			}else{
@@ -434,70 +412,47 @@ int main(int argc, char **argv)
 
 	}
 
-	if(is_client==1 ){
+//	if((is_client ==1 && OPERATOR == WRITE_OPERATOR) || (is_client == 0 && OPERATOR == READ_OPERATOR))
+//		if(pthread_create(&dcbnetlink_thread, NULL, run_dcbnetlink, NULL) != 0)
+//			die("main(): Failed to create worker thread .");	
+
+//	signal(SIGALRM, sigalarm_handler);
+	if(is_client==1){
 		struct timespec incast_start, incast_end;
 		clock_gettime(CLOCK_MONOTONIC, &incast_start);
 		if(is_sync == 1)
 			syntime = incast_start.tv_sec*BILLION + incast_start.tv_nsec + BILLION; 
 
-		printf("tput:\n");
-		int i;	
-		for(i=1;i< num_threads;i++)
-			if(pthread_create(&server_thread[i], NULL, run_rone_server, (void*)i)!= 0)
-				die("main(): Failed to create server thread .");	
-	
-		for(i=num_threads; i< num_threads*2; i++){
+		int i;
+		for(i = 1; i < num_threads; i++){
 			if(pthread_create(&latency_thread[i%num_threads], NULL, latency_measure, (void *) i) != 0)
 				die("main(): Failed to create worker thread .");	
-		}
 
-		run_rone_server((void*)(intptr_t)0);	
+		}
+		(void) latency_measure((void*)(intptr_t)0);
+	
 		
 		/* Waiting for completion */
 		for( i= 1; i < num_threads; i++)
-			if(pthread_join(server_thread[i], NULL) !=0 )
+			if(pthread_join(ib_threads[i], NULL) !=0 )
 				die("main(): Join failed for worker thread i");
-
-		clock_gettime(CLOCK_MONOTONIC, &incast_end);
-		long long unsigned diff = (long long unsigned)(BILLION * (incast_end.tv_sec - incast_start.tv_sec) + incast_end.tv_nsec - incast_start.tv_nsec);
-		if(is_sync == 1)
-			diff = diff -BILLION;
-		uint64_t data=0;
-/*		for(i=0;i<num_threads;i++){
-			s_ctx = multi_ctx[i];
-			data += s_ctx->recv_bytes;
-		}*/
-		s_ctx = multi_ctx[0];
-		
-		data = s_ctx->conn->num_requests*s_ctx->conn->send_message_size* num_threads;
-		double tput = data*8.0/diff;
-		double tot_time = (double)diff/BILLION;
-		//printf("throughput @ thread %d time %llu ns, size %llu bits, tput %f Gb/s\n", index, diff, data, tput);
-		printf("- [AGG,%.9g, %"PRIu64", %.9g, %d]\n", tot_time, data, tput,num_threads);
 
 		printf("latency:\n");	
 		int j=0;
 		for(j=0;j<num_threads; j++){
 			for(i=0; i<MAX_TIMESTAMP_SIZE; i++){
-				if(lats[j][i] == 0){
-					//printf("%d\n", lats[j][i]);
+				if(lats[j][i] == 0)
 					break;
-				}
 				printf("- [%d, %"PRIu64"]\n", j, lats[j][i]);
 			}	
 		}
-	/*	for(index=0; index<num_threads;index++){
+		/*for(index=0; index<num_threads;index++){
 			on_disconnect(multi_ctx[index]);
-		}	*/
+		}*/
+			
 	}else{
-		int i;
-		for(i = 1; i < num_threads; i++){
-			if(pthread_create(&ib_threads[i], NULL, incast, (void *) i) != 0)
-				die("main(): Failed to create worker thread .");	
-		}
-		(void) incast((void*)(intptr_t)0);
-
-		//poll_send_cq(multi_ctx[1]);
+		poll_send_cq(multi_ctx[0]);	
+		poll_send_cq(multi_ctx[1]);	
 	}
 	return 0;
 }
@@ -508,54 +463,8 @@ void *run_rone_server(void *arg){
 	bindingCPU(index);
 	struct context *s_ctx=multi_ctx[index];
 	struct connection *conn = s_ctx->conn;
+	run_server(portno+index, conn, s_ctx->pd, index%8);
 
-	//printf("run_rone_server index %d\n", index);
-	//post_receive(conn->qp);
-	struct timespec start, end;
-	int dur= 0;
-	clock_gettime(CLOCK_MONOTONIC, &start);
-
-	long long unsigned st = start.tv_sec*BILLION + start.tv_nsec;
-	if(is_sync == 1){
-		while(st < syntime){
-			clock_gettime(CLOCK_MONOTONIC, &start);
-			st = start.tv_sec*BILLION + start.tv_nsec;
-		}
-	}
-
-	on_write_read(s_ctx, conn,0,WRITE_IMM_OPERATOR, COMMON_ROCE);		
-	
-/*	clock_gettime(CLOCK_MONOTONIC, &start);
-
-	s_ctx->recv_bytes = polling_write(conn->recv_region, s_ctx->cq, index);
-
-	clock_gettime(CLOCK_MONOTONIC, &end);
-
-	long long unsigned diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-	long unsigned data = (long unsigned)s_ctx->recv_bytes;
-
-	//printf("data %llu, %llu\n", conn->num_sendcount, conn->send_message_size);
-	double tput = data*8.0/diff;
-	double tot_time = (double)diff/BILLION;
-	//printf("throughput @ thread %d time %llu ns, size %llu bits, tput %f Gb/s\n", index, diff, data, tput);
-	printf("- [%.9g, %lu, %.9g, 1]\n", tot_time, data, tput);
-
-*/
-/*	struct ibv_exp_wc wc;
-	int k=0;
-	do{
-		k=ibv_exp_poll_cq(s_ctx->cq, 1, &wc, sizeof(wc));
-	}while(k<=0);
-	if (wc.status != IBV_WC_SUCCESS){
-				fprintf(stderr," wrong wc->status: %s, opcode %s\n",
-					ibv_wc_status_str(wc.status), ibv_wc_opcode_str(wc.exp_opcode));
-				//break;
-				return;	
-			}
-
-	printf ("%.1024s", conn->recv_region);*/
-
-	poll_send_cq(s_ctx);
 }
 
 
@@ -716,8 +625,8 @@ void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index
 	int sockfd, newsockfd; // portno;
 	socklen_t clilen;
 
-//	printf("portno %d\n", portno);
 	//char buffer[S_QPA];
+	printf("portno %d\n", portno);
 	struct sockaddr_in serv_addr, cli_addr;
 	int n;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -740,7 +649,6 @@ void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index
 	if (newsockfd < 0) 
 		die("ERROR on accept");
 
-	//printf("portno %d\n", portno);
 	//memset(s_ctx->remote_qp_attr, 0, S_QPA);
 	conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
 	n = recv(newsockfd,conn->remote_qp_attr,S_QPA,0);
@@ -765,7 +673,7 @@ void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index
 		modify_dgram_qp_to_rts(conn,  conn->local_qp_attr->psn);
 	}else{
 		if(connect_ctx(conn, conn->local_qp_attr->psn, 
-					conn->remote_qp_attr,index, COMMON_ROCE)) {
+					conn->remote_qp_attr,index, COMMON_RONE)) {
 			fprintf(stderr, "Couldn't connect to remote QP\n");
 			exit(0);
 		}
