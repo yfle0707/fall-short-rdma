@@ -27,7 +27,9 @@
 #define DUPLICATE_COPIES 1
 
 #define CPUGHZ  2.0f
-
+#define REGESTER_MEMORY_MEASURE
+#define QP_INIT_MEASURE
+#define QP_CONNECT_MEASURE
 
 void reply_operation(struct connection *conn, int USE_WRITE);
 void *write_cq(void *context);
@@ -171,7 +173,8 @@ static void * latency_measure(void * arg){
 	struct connection *conn = s_ctx->conn;
 	conn->send_message_size = 0;
 	int i=0;
-	while(1){
+	int count=0;
+	while(count < conn->num_requests){
 		//uint64_t start_ts = query_hardware_time(s_ctx->ctx);
 		uint64_t start_ts =on_write_read(s_ctx,conn,1, WRITE_OPERATOR, COMMON_ROCE);
 		
@@ -202,11 +205,11 @@ static void * latency_measure(void * arg){
 			}
 
 			uint64_t basertt= (cur_nic_ts - start_ts)/NIC_CLOCK_MHZ;
-			//printf("baseRTT %"PRIu64"\n", basertt);
+			printf("baseRTT %"PRIu64"\n", basertt);
 			lats[index%num_threads][i]=basertt;
 			i++;
 		}
-		usleep(500);
+		count += k;
 		if(i>=MAX_TIMESTAMP_SIZE)
 			break;		
 
@@ -336,6 +339,7 @@ int main(int argc, char **argv)
 	struct context *s_ctx;
 	for(index=0;index<(num_threads);index++){
 		s_ctx = NULL;
+		
 		s_ctx = init_ctx(ib_dev,s_ctx);
 		multi_ctx[index] = s_ctx;		
 		//initilize connection
@@ -351,16 +355,37 @@ int main(int argc, char **argv)
 		//TEST_NZ(pthread_create(&s_ctx->send_cq_poller_thread, NULL, poll_send_cq, NULL));
 
 		conn->actual_completions =0;
+		struct timespec start, end;
+		long long unsigned diff;
+#ifdef REGESTER_MEMORY_MEASURE	
+		clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
+		//setting the memory area
+		set_memory(conn, s_ctx, OPERATOR,2*index+REQ_AREA_SHM_KEY);
+#ifdef REGESTER_MEMORY_MEASURE	
+		clock_gettime(CLOCK_MONOTONIC, &end);
+		diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+		printf("memory register time %llu us\n", diff / 1000);
+#endif
 		//queue pair initilization
+
+#ifdef QP_INIT_MEASURE
+		clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 		struct ibv_qp_init_attr qp_attr;
 		build_qp_attr(&qp_attr,s_ctx);  
 		TEST_Z(conn->qp = ibv_create_qp(s_ctx->pd, &qp_attr));
 		get_qp_info(s_ctx);
-
 		modify_qp_to_init(conn);
-		//setting the memory area
-		set_memory(conn, s_ctx, OPERATOR,2*index+REQ_AREA_SHM_KEY);
-		/*	int blocks = RECV_BUFFER_SIZE/send_message_size;
+	
+#ifdef QP_INIT_MEASURE
+		clock_gettime(CLOCK_MONOTONIC, &end);
+		diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+		printf("queue pair init time %llu us\n", diff / 1000);
+#endif
+
+
+			/*	int blocks = RECV_BUFFER_SIZE/send_message_size;
 			int i=0;
 			for(i=0;i<blocks;i++){
 			char c=i%26+'a';
@@ -378,10 +403,19 @@ int main(int argc, char **argv)
 			//printf("server %s, portno %d\n", hosts[index_i], portno+index); 
 			if(index == index_i){
 				run_client(portno,hosts[index],conn);
+#ifdef QP_CONNECT_MEASURE
+				clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 				if(connect_ctx(conn, conn->local_qp_attr->psn, conn->remote_qp_attr, index_i, COMMON_ROCE)){
 					printf("connect_ctx error at client side\n");
 					return 1;
 				}
+#ifdef QP_CONNECT_MEASURE
+			clock_gettime(CLOCK_MONOTONIC, &end);
+			diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+			printf("queue pair connection time %llu us\n", diff / 1000);
+
+#endif
 			}else{
 				run_client(portno+1, hosts[index_i], conn);
 				if(connect_ctx(conn, conn->local_qp_attr->psn, conn->remote_qp_attr, 7, COMMON_ROCE)){
@@ -437,7 +471,7 @@ int main(int argc, char **argv)
 			if(pthread_join(ib_threads[i], NULL) !=0 )
 				die("main(): Join failed for worker thread i");
 
-		printf("latency:\n");	
+/*		printf("latency:\n");	
 		int j=0;
 		for(j=0;j<num_threads; j++){
 			for(i=0; i<MAX_TIMESTAMP_SIZE; i++){
@@ -445,7 +479,7 @@ int main(int argc, char **argv)
 					break;
 				printf("- [%d, %"PRIu64"]\n", j, lats[j][i]);
 			}	
-		}
+		}*/
 		/*for(index=0; index<num_threads;index++){
 			on_disconnect(multi_ctx[index]);
 		}*/
