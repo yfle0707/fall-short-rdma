@@ -16,6 +16,7 @@
 #include <rdma/rdma_cma.h>
 
 #include "rudp.h"
+#include "util.h"
 //#define BILLION 1000000000L
 
 #define IB_PHYS_PORT 2

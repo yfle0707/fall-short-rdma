@@ -27,7 +27,7 @@ LDFLAGS := ${LDFLAGS} -lrdmacm -libverbs -lrt -lpthread -lmnl -lm
 
 all: connection_setup 
 
-connection_setup: common.o  connection_setup.o   rudp.o  share.o timely.o timely_reno.o pri_dcbnetlink.o queue.o
+connection_setup: common.o  connection_setup.o   rudp.o  share.o timely.o timely_reno.o pri_dcbnetlink.o queue.o util.o
 	${LD} -o $@ $^ ${LDFLAGS}
 
 

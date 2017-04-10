@@ -1,8 +1,3 @@
-#define __USE_GNU
-#define _GNU_SOURCE
-
-#include <sched.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,18 +21,6 @@ void get_qp_info(struct context *s_ctx){
 	s_ctx->conn->local_qp_attr->lid                     = get_local_lid(s_ctx->ctx);
 	s_ctx->conn->local_qp_attr->qpn                     = s_ctx->conn->qp->qp_num;
 	s_ctx->conn->local_qp_attr->psn                     = lrand48() & 0xffffff;
-
-}
-void bindingCPU(int num){
-	int result;
-	cpu_set_t mask;
-	CPU_ZERO(&mask);
-	CPU_SET(num, &mask);
-	result = sched_setaffinity(0, sizeof(mask), &mask);
-	if (result < 0){
-		printf("binding CPU fails\n");
-		exit(1);
-	}
 
 }
 
