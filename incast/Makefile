@@ -1,20 +1,17 @@
-CC = gcc
-CFLAGS = -O2 -Wall -I . -g
+CFLAGS  := -O3 -g 
+LD      := gcc
+LDFLAGS := ${LDFLAGS} -lrdmacm -libverbs -lrt -lpthread -lm
 
-# This flag includes the Pthreads library on a Linux box.
-# Others systems will probably require something different.
-LIB = -lpthread -lrt -lm
 
-all: server client
+all: incast_server incast_client 
 
-server: incast_server.c csapp.o
-	$(CC) $(CFLAGS) -o incast_server incast_server.c csapp.o $(LIB)
+incast_server: incast_server.o csapp.o
+	${LD} -o $@ $^ ${LDFLAGS}
+incast_client: incast_client.o ../util.o csapp.o 
+	${LD} -o $@ $^ ${LDFLAGS}
 
-client: incast_client.c csapp.o
-	$(CC) $(CFLAGS) -o incast_client incast_client.c csapp.o $(LIB)
 
-csapp.o:
-	$(CC) $(CFLAGS) -c csapp.c
-
+	
+PHONY: clean
 clean:
-	rm -f *.o incast_server incast_client
+	rm -f *.o ../util.o incast_server incast_client 
