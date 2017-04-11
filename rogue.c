@@ -92,11 +92,7 @@ uint64_t polling_write(char *region, struct ibv_cq *recv_cq, int index){
 
 
 
-void die(const char *reason)
-{
-	fprintf(stderr, "%s\n", reason);
-	exit(EXIT_FAILURE);
-}
+
 
 const char *ibv_wc_opcode_str(enum ibv_exp_wc_opcode opcode)
 {

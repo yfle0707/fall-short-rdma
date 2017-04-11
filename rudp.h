@@ -91,7 +91,7 @@ typedef struct rudp_cli_state_s {
 } rudp_cli_state_t;
 
 /* Function prototypes */
-void die(const char *reason);
+//void die(const char *reason);
 
 const char *ibv_wc_opcode_str(enum ibv_exp_wc_opcode opcode);
 

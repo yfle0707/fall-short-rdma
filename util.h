@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <inttypes.h>
+#include <stdlib.h>
 
 #ifndef TRUE
 #define TRUE (1)
@@ -13,4 +14,5 @@
 
 
 void bindingCPU(int num);
+void die(const char *reason);
 
