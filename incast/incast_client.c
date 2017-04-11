@@ -749,6 +749,8 @@ void RunMain(void *arg){
 	struct conn *connp;
 	int i;
         int index = (int) arg;
+
+	bindingCPU(index);
 	/* Initialize the connection pool. */
 	init_pool(&pool);
 
