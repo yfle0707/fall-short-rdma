@@ -45,7 +45,6 @@ void *run_rone_server(void *arg);
 
 int send_message_size = 2048;
 int num_send_request =0;
-int window_size= 1;
 int signaled=0;
 //int cpu_id=0;
 int portno=55281;
@@ -321,136 +320,80 @@ int poll_send_cq(struct context *ctx)
 	return k;
 }
 
-int main(int argc, char **argv)
-{
-	parseOpt(argc,argv); 
-	if(is_client==1 && hosts == NULL){
-		printf("the number of parameters doest not match with server or client \n \
-				client:<port><server><isClient> \n \
-				server:<port>\n");
-		exit(1);
-	}
+struct ibv_device *ib_dev; 
 
-	struct ibv_device **dev_list = ibv_get_device_list(NULL) ;
-	struct ibv_device *ib_dev = dev_list[0];
+void RunMain(void *arg){
 
-	memset(lats, 0 ,sizeof(lats));
-	int index;
 	struct context *s_ctx;
-	for(index=0;index<(num_threads);index++){
-		s_ctx = NULL;
-		
-		s_ctx = init_ctx(ib_dev,s_ctx);
-		multi_ctx[index] = s_ctx;		
-		//initilize connection
-		struct connection *conn= s_ctx->conn;
-		conn->send_message_size = send_message_size;
-		conn->num_requests = num_send_request;
-		conn->send_transport = RC_TRANSPORT;
-		conn->signal_all = signaled;
-		conn->window_size = window_size;
-		conn->isClient= is_client;
-		//if (conn->isClient == 0)	
-		//	TEST_NZ(pthread_create(&s_ctx->cq_poller_thread, NULL, poll_cq,NULL));
-		//TEST_NZ(pthread_create(&s_ctx->send_cq_poller_thread, NULL, poll_send_cq, NULL));
+	s_ctx = NULL;
+	int index = (int*)arg;
+	s_ctx = init_ctx(ib_dev,s_ctx);
+	multi_ctx[index] = s_ctx;		
+	//initilize connection
+	struct connection *conn= s_ctx->conn;
+	conn->send_message_size = send_message_size;
+	conn->num_requests = num_send_request;
+	conn->send_transport = RC_TRANSPORT;
+	conn->signal_all = signaled;
+	conn->isClient= is_client;
 
-		conn->actual_completions =0;
-		struct timespec start, end;
-		long long unsigned diff;
+	conn->actual_completions =0;
+	struct timespec start, end;
+	long long unsigned diff;
 #ifdef REGESTER_MEMORY_MEASURE	
-		clock_gettime(CLOCK_MONOTONIC, &start);
+	clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
-		//setting the memory area
-		set_memory(conn, s_ctx, OPERATOR,2*index+REQ_AREA_SHM_KEY);
+	//setting the memory area
+	set_memory(conn, s_ctx, OPERATOR,2*index+REQ_AREA_SHM_KEY);
 #ifdef REGESTER_MEMORY_MEASURE	
-		clock_gettime(CLOCK_MONOTONIC, &end);
-		diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-		printf("memory register time %llu us\n", diff / 1000);
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+	printf("memory register time %llu us\n", diff / 1000);
 #endif
-		//queue pair initilization
+	//queue pair initilization
 
 #ifdef QP_INIT_MEASURE
+	clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
+	struct ibv_qp_init_attr qp_attr;
+	build_qp_attr(&qp_attr,s_ctx);  
+	TEST_Z(conn->qp = ibv_create_qp(s_ctx->pd, &qp_attr));
+	get_qp_info(s_ctx);
+	modify_qp_to_init(conn);
+
+#ifdef QP_INIT_MEASURE
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+	printf("queue pair init time %llu us\n", diff / 1000);
+#endif
+
+
+	if(conn->isClient ){   
+		//printf("server %s, portno %d\n", hosts[index_i], portno+index); 
+		run_client(portno,hosts[index],conn);
+#ifdef QP_CONNECT_MEASURE
 		clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
-		struct ibv_qp_init_attr qp_attr;
-		build_qp_attr(&qp_attr,s_ctx);  
-		TEST_Z(conn->qp = ibv_create_qp(s_ctx->pd, &qp_attr));
-		get_qp_info(s_ctx);
-		modify_qp_to_init(conn);
-	
-#ifdef QP_INIT_MEASURE
+		if(connect_ctx(conn, conn->local_qp_attr->psn, conn->remote_qp_attr, index, COMMON_ROCE)){
+			printf("connect_ctx error at client side\n");
+			return ;
+		}
+#ifdef QP_CONNECT_MEASURE
 		clock_gettime(CLOCK_MONOTONIC, &end);
 		diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-		printf("queue pair init time %llu us\n", diff / 1000);
-#endif
-
-
-			/*	int blocks = RECV_BUFFER_SIZE/send_message_size;
-			int i=0;
-			for(i=0;i<blocks;i++){
-			char c=i%26+'a';
-			if (conn->isClient == 1){
-		//set server memory
-		fillzero(s_ctx->conn->recv_region+i*send_message_size, c, send_message_size);
-		}else{
-		//clear client memory
-		fillzero(s_ctx->conn->recv_region+i*send_message_size, '0', send_message_size);
-		}
-		}*/
-
-		int index_i = index% num_threads;
-		if(conn->isClient ){   
-			//printf("server %s, portno %d\n", hosts[index_i], portno+index); 
-			if(index == index_i){
-				run_client(portno,hosts[index],conn);
-#ifdef QP_CONNECT_MEASURE
-				clock_gettime(CLOCK_MONOTONIC, &start);
-#endif
-				if(connect_ctx(conn, conn->local_qp_attr->psn, conn->remote_qp_attr, index_i, COMMON_ROCE)){
-					printf("connect_ctx error at client side\n");
-					return 1;
-				}
-#ifdef QP_CONNECT_MEASURE
-			clock_gettime(CLOCK_MONOTONIC, &end);
-			diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-			printf("queue pair connection time %llu us\n", diff / 1000);
+		printf("queue pair connection time %llu us\n", diff / 1000);
 
 #endif
-			}else{
-				run_client(portno+1, hosts[index_i], conn);
-				if(connect_ctx(conn, conn->local_qp_attr->psn, conn->remote_qp_attr, 7, COMMON_ROCE)){
-					printf("connect_ctx error at client side\n");
-					return 1;
-				}
-	
-			}
-			//if(OPERATOR == READ_OPERATOR  && conn->signal_all == 0)
-			//	TEST_NZ(pthread_create(&s_ctx->write_poller_thread, NULL, write_cq, s_ctx->conn));
-			//TEST_NZ(pthread_create(&s_ctx->throughput_timer_thread, NULL, throughput_timer, s_ctx->conn));
-			//sleep(1);	
-			//init_rtt();
-			//exit(0);	
-			//reply_operation(s_ctx->conn, OPERATOR);   
-		
-		}else{
-			//printf("portno %d\n", portno+index);
-			if(index == index_i){
-				if(pthread_create(&server_thread[index/2], NULL, run_rone_server, (void*)index)!= 0)
-					die("main(): Failed to create server thread .");	
 
-			}else{
-				run_server(portno+index, conn, s_ctx->pd, 7);				
-			}
-
-		}
+	}else{
+		//printf("portno %d\n", portno+index);
+		run_server(portno+index, conn, s_ctx->pd, 7);				
 
 	}
 
-//	if((is_client ==1 && OPERATOR == WRITE_OPERATOR) || (is_client == 0 && OPERATOR == READ_OPERATOR))
-//		if(pthread_create(&dcbnetlink_thread, NULL, run_dcbnetlink, NULL) != 0)
-//			die("main(): Failed to create worker thread .");	
 
-//	signal(SIGALRM, sigalarm_handler);
+
+	//	signal(SIGALRM, sigalarm_handler);
 	if(is_client==1){
 		struct timespec incast_start, incast_end;
 		clock_gettime(CLOCK_MONOTONIC, &incast_start);
@@ -464,31 +407,51 @@ int main(int argc, char **argv)
 
 		}
 		(void) latency_measure((void*)(intptr_t)0);
-	
-		
+
+
 		/* Waiting for completion */
 		for( i= 1; i < num_threads; i++)
 			if(pthread_join(ib_threads[i], NULL) !=0 )
 				die("main(): Join failed for worker thread i");
 
-/*		printf("latency:\n");	
-		int j=0;
-		for(j=0;j<num_threads; j++){
-			for(i=0; i<MAX_TIMESTAMP_SIZE; i++){
+		/*		printf("latency:\n");	
+				int j=0;
+				for(j=0;j<num_threads; j++){
+				for(i=0; i<MAX_TIMESTAMP_SIZE; i++){
 				if(lats[j][i] == 0)
-					break;
+				break;
 				printf("- [%d, %"PRIu64"]\n", j, lats[j][i]);
-			}	
-		}*/
+				}	
+				}*/
 		/*for(index=0; index<num_threads;index++){
-			on_disconnect(multi_ctx[index]);
-		}*/
-			
+		  on_disconnect(multi_ctx[index]);
+		  }*/
+
 	}else{
 		poll_send_cq(multi_ctx[0]);	
 		poll_send_cq(multi_ctx[1]);	
 	}
-	return 0;
+
+}
+
+
+int main(int argc, char **argv)
+{
+	parseOpt(argc,argv); 
+	if(is_client==1 && hosts == NULL){
+		printf("the number of parameters doest not match with server or client \n \
+				client:<port><server><isClient> \n \
+				server:<port>\n");
+		exit(1);
+	}
+
+	struct ibv_device **dev_list = ibv_get_device_list(NULL) ;
+	ib_dev = dev_list[0];
+
+	memset(lats, 0 ,sizeof(lats));
+	int index;
+	for(index=0;index<(num_threads);index++){
+	}
 }
 
 void *run_rone_server(void *arg){
@@ -504,67 +467,6 @@ void *run_rone_server(void *arg){
 
 
 
-/*void reply_operation(struct connection *conn, int USE_WRITE){
-	if(conn->num_sendcount == 0 && conn->isClient == 1 ){
-		int i;
-		for(i=0;i<conn->window_size/DUPLICATE_COPIES;i++){
-			conn->num_sendcount ++;
-			if(USE_WRITE){
-				int j=0;
-				for (j=0; j< DUPLICATE_COPIES;j++)
-					on_write_read(s_ctx, conn,0, USE_WRITE);
-				//rudp_send_read_write(s_ctx,conn, 0, USE_WRITE);
-			}else
-				on_send(conn,0);
-			printf("num_sendcount %d\n", conn->num_sendcount);
-			record_timestamp(conn->num_sendcount-conn->num_requests/2, starttimestamp);
-		}
-		return;
-	}
-
-	conn->num_sendcount++;
-	if(conn->num_sendcount*DUPLICATE_COPIES%MAX_SEND_WR == 0){
-		if(USE_WRITE){
-			int	j=0;
-			for (j=0;j<DUPLICATE_COPIES;j++)
-				on_write_read(s_ctx, conn,1, USE_WRITE);
-			//rudp_send_read_write(s_ctx,conn, 0, USE_WRITE);
-
-		}else
-			on_send(conn,1);
-	}else{
-		//while(1){ if(conn->isSignal == 0) break;}
-		if(USE_WRITE){
-			int j=0;
-			for(j=0;j<DUPLICATE_COPIES;j++)
-				on_write_read(s_ctx, conn,0, USE_WRITE);
-			//rudp_send_read_write(s_ctx,conn, 0, USE_WRITE);
-		}else
-			on_send(conn,0);
-	}
-	record_timestamp(conn->num_sendcount-conn->num_requests/2, starttimestamp);
-}*/
-
-/*void recv_message(struct connection *conn){
-	conn->actual_completions ++;
-	char * region = conn->recv_region;
-	int blocks = RECV_BUFFER_SIZE/conn->send_message_size;
-	char c = (char)region[(conn->num_completions)%blocks*conn->send_message_size]; 
-	char exp =( (conn->num_completions)/blocks)%26+'a';
-	if( c == exp ){
-		record_timestamp(conn->num_completions - conn->num_requests/2, endtimestamp);
-		conn->num_completions ++;
-	}
-
-	if (conn->num_completions < conn->num_requests && conn->num_sendcount*DUPLICATE_COPIES-conn->actual_completions < conn->window_size){
-		// keep the requests on the network less than MAX_SEND_WR
-		reply_operation(conn, OPERATOR);
-	}else if (conn->num_completions >= conn->num_requests){
-		printf("conn->num_completions: %d\n", conn->num_completions);
-		per_request_latency(conn, starttimestamp, endtimestamp);
-		exit(0); 		
-	}
-}*/
 
 void on_completion(struct ibv_wc *wc, int k)
 {

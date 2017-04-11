@@ -12,6 +12,7 @@
 #define FALSE (0)
 #endif
 
+#define BILLION 1000000000L
 
 void bindingCPU(int num);
 void die(const char *reason);

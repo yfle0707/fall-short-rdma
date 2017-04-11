@@ -17,7 +17,6 @@
 
 #include "rudp.h"
 #include "util.h"
-//#define BILLION 1000000000L
 
 #define IB_PHYS_PORT 2
 //#define GID_INDEX 2 
