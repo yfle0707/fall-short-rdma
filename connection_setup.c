@@ -34,8 +34,9 @@
 void reply_operation(struct connection *conn, int USE_WRITE);
 void *write_cq(void *context);
 void run_client(int port, char *host, struct connection *conn);
-void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index);
+//void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index);
 void on_completion(struct ibv_wc *wc, int k);
+void * RunServer(void *arg);
 void * poll_cq(void *ctx);
 int  poll_send_cq(struct context *ctx);
 void recv_message(struct connection *conn);
@@ -64,10 +65,13 @@ long long unsigned syntime;
 struct context *multi_ctx[MAX_NUM_IB_THREADS];
 pthread_t ib_threads[MAX_NUM_IB_THREADS/2];
 char *hosts[MAX_NUM_IB_THREADS]={NULL};
-pthread_t latency_thread[MAX_NUM_IB_THREADS/2];
+pthread_t latency_threads[MAX_NUM_IB_THREADS/2];
 
 uint64_t lats[MAX_NUM_IB_THREADS/2][MAX_TIMESTAMP_SIZE];
 pthread_t server_thread[MAX_NUM_IB_THREADS];
+
+int nflows[MAX_NUM_IB_THREADS];
+
 /*static sigjmp_buf jmp_alarm[MAX_NUM_IB_THREADS];
 static void 
 sigalarm_handler (int signo)
@@ -169,7 +173,7 @@ static void * latency_measure(void * arg){
 
 	bindingCPU(index);
 	struct context *s_ctx=multi_ctx[index];
-	struct connection *conn = s_ctx->conn;
+	struct connection *conn = s_ctx->conns[index];
 	conn->send_message_size = 0;
 	int i=0;
 	int count=0;
@@ -221,7 +225,7 @@ static void * incast(void * arg){
 
 	bindingCPU(index);
 	struct context *s_ctx=multi_ctx[index];
-	struct connection *conn = s_ctx->conn;
+	struct connection *conn = s_ctx->conns[index];
 	//s_ctx->srv_state->index = index;
 	//s_ctx->srv_state->sl = index%num_threads;
 	struct timespec start, end;
@@ -320,17 +324,18 @@ int poll_send_cq(struct context *ctx)
 	return k;
 }
 
+
+
 struct ibv_device *ib_dev; 
 
-void RunMain(void *arg){
+void init_connection(struct context *s_ctx, int index){
+	struct connection *conn = (struct connection *)malloc(sizeof(struct connection)); 
+	conn->num_completions = 0;
+	conn->num_sendcount = 0;
 
-	struct context *s_ctx;
-	s_ctx = NULL;
-	int index = (int*)arg;
-	s_ctx = init_ctx(ib_dev,s_ctx);
-	multi_ctx[index] = s_ctx;		
+	s_ctx->conns[index] = conn;
+	s_ctx->nr_conns ++;
 	//initilize connection
-	struct connection *conn= s_ctx->conn;
 	conn->send_message_size = send_message_size;
 	conn->num_requests = num_send_request;
 	conn->send_transport = RC_TRANSPORT;
@@ -356,9 +361,9 @@ void RunMain(void *arg){
 	clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 	struct ibv_qp_init_attr qp_attr;
-	build_qp_attr(&qp_attr,s_ctx);  
+	build_qp_attr(&qp_attr,conn, s_ctx);  
 	TEST_Z(conn->qp = ibv_create_qp(s_ctx->pd, &qp_attr));
-	get_qp_info(s_ctx);
+	get_qp_info(s_ctx, conn);
 	modify_qp_to_init(conn);
 
 #ifdef QP_INIT_MEASURE
@@ -368,13 +373,28 @@ void RunMain(void *arg){
 #endif
 
 
-	if(conn->isClient ){   
-		//printf("server %s, portno %d\n", hosts[index_i], portno+index); 
-		run_client(portno,hosts[index],conn);
+}
+void RunMain(void *arg){
+
+	struct context *s_ctx;
+	s_ctx = NULL;
+	int i;
+	int index = (int*)arg;
+	int target = nflows[index];
+	s_ctx = init_ctx(ib_dev,s_ctx);
+	multi_ctx[index] = s_ctx;		
+
+	for(i=0;i<nflows[index];i++)
+		init_connection(s_ctx,i);
+
+	for(i=0;i<nflows[index];i++){
+		run_client(portno+index,hosts[0],s_ctx->conns[i]);
 #ifdef QP_CONNECT_MEASURE
+		struct timespec start, end;
+		long long unsigned diff;
 		clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
-		if(connect_ctx(conn, conn->local_qp_attr->psn, conn->remote_qp_attr, index, COMMON_ROCE)){
+		if(connect_ctx(s_ctx->conns[i], s_ctx->conns[i]->local_qp_attr->psn, s_ctx->conns[i]->remote_qp_attr, index, COMMON_ROCE)){
 			printf("connect_ctx error at client side\n");
 			return ;
 		}
@@ -385,51 +405,7 @@ void RunMain(void *arg){
 
 #endif
 
-	}else{
-		//printf("portno %d\n", portno+index);
-		run_server(portno+index, conn, s_ctx->pd, 7);				
 
-	}
-
-
-
-	//	signal(SIGALRM, sigalarm_handler);
-	if(is_client==1){
-		struct timespec incast_start, incast_end;
-		clock_gettime(CLOCK_MONOTONIC, &incast_start);
-		if(is_sync == 1)
-			syntime = incast_start.tv_sec*BILLION + incast_start.tv_nsec + BILLION; 
-
-		int i;
-		for(i = 1; i < num_threads; i++){
-			if(pthread_create(&latency_thread[i%num_threads], NULL, latency_measure, (void *) i) != 0)
-				die("main(): Failed to create worker thread .");	
-
-		}
-		(void) latency_measure((void*)(intptr_t)0);
-
-
-		/* Waiting for completion */
-		for( i= 1; i < num_threads; i++)
-			if(pthread_join(ib_threads[i], NULL) !=0 )
-				die("main(): Join failed for worker thread i");
-
-		/*		printf("latency:\n");	
-				int j=0;
-				for(j=0;j<num_threads; j++){
-				for(i=0; i<MAX_TIMESTAMP_SIZE; i++){
-				if(lats[j][i] == 0)
-				break;
-				printf("- [%d, %"PRIu64"]\n", j, lats[j][i]);
-				}	
-				}*/
-		/*for(index=0; index<num_threads;index++){
-		  on_disconnect(multi_ctx[index]);
-		  }*/
-
-	}else{
-		poll_send_cq(multi_ctx[0]);	
-		poll_send_cq(multi_ctx[1]);	
 	}
 
 }
@@ -449,21 +425,30 @@ int main(int argc, char **argv)
 	ib_dev = dev_list[0];
 
 	memset(lats, 0 ,sizeof(lats));
-	int index;
+	int index,i;
 	for(index=0;index<(num_threads);index++){
+		if(is_client == 0){
+	       		if (pthread_create(&latency_threads[i],
+                                        NULL, RunServer, (void *)i)) {
+                	        perror("pthread_create");
+                        	exit(-1);
+                	}
+		}else{
+			if (pthread_create(&latency_threads[i],
+                                        NULL, RunMain, (void *)i)) {
+                	        perror("pthread_create");
+                        	exit(-1);
+			}
+		
+		}
+
 	}
+	for( i= 0; i < num_threads; i++)
+		if(pthread_join(ib_threads[i], NULL) !=0 )
+			die("main(): Join failed for worker thread i");
+
+	
 }
-
-void *run_rone_server(void *arg){
-	int index = (int) arg;
-
-	bindingCPU(index);
-	struct context *s_ctx=multi_ctx[index];
-	struct connection *conn = s_ctx->conn;
-	run_server(portno+index, conn, s_ctx->pd, index%8);
-
-}
-
 
 
 
@@ -556,13 +541,21 @@ void * write_cq(void *context)
 	}
 	return NULL;
 }*/
-void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index)
+void * RunServer(void *arg)
 {
 	int sockfd, newsockfd; // portno;
 	socklen_t clilen;
+	int index = (int) arg;
 
-	//char buffer[S_QPA];
-	printf("portno %d\n", portno);
+	//init rdma context 
+	struct context *s_ctx;
+	int i;
+	s_ctx = init_ctx(ib_dev,s_ctx);
+	multi_ctx[index] = s_ctx;		
+
+
+	//init tcp
+	printf("portno %d\n", portno+index);
 	struct sockaddr_in serv_addr, cli_addr;
 	int n;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -579,49 +572,54 @@ void run_server(int portno,struct connection *conn, struct ibv_pd *pd, int index
 	listen(sockfd,5);
 
 	clilen = sizeof(cli_addr);
-	newsockfd = accept(sockfd, 
-			(struct sockaddr *) &cli_addr, 
-			&clilen);
-	if (newsockfd < 0) 
-		die("ERROR on accept");
+	while(1){
+		newsockfd = accept(sockfd, 
+				(struct sockaddr *) &cli_addr, 
+				&clilen);
+		if (newsockfd < 0) 
+			die("ERROR on accept");
 
-	//memset(s_ctx->remote_qp_attr, 0, S_QPA);
-	conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
-	n = recv(newsockfd,conn->remote_qp_attr,S_QPA,0);
-	if (n < 0) die("ERROR reading from socket");
+		//memset(s_ctx->remote_qp_attr, 0, S_QPA);
+		init_connection(s_ctx, s_ctx->nr_conns);
+		struct connection *conn= s_ctx->conns[s_ctx->nr_conns];
+		s_ctx->nr_conns++;
 
-	//print_qp_attr(conn->remote_qp_attr);
+		//print_qp_attr(conn->remote_qp_attr);
 
-	n = send(newsockfd,conn->local_qp_attr,S_QPA,0);
-	if (n < 0) die("ERROR writing to socket");
-	//print_qp_attr(conn->local_qp_attr);
+		n = send(newsockfd,conn->local_qp_attr,S_QPA,0);
+		if (n < 0) die("ERROR writing to socket");
+		//print_qp_attr(conn->local_qp_attr);
+		conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
+		n = recv(newsockfd,conn->remote_qp_attr,S_QPA,0);
+		if (n < 0) die("ERROR reading from socket");
 
-	//if(USE_WRITE){  
-	conn->peer_mr = (struct ibv_mr*)malloc(sizeof(struct ibv_mr));
-	n=recv(newsockfd, conn->peer_mr,sizeof(struct ibv_mr),0);
-	if (n < 0) die("ERROR reading from peer_mr");
-	n=send(newsockfd,conn->recv_mr, sizeof(struct ibv_mr),0);
-	if (n<0) die("ERROR writing send_r");   
-	// }
 
-	if(conn->send_transport == 2){
-		create_ah(conn, pd);
-		modify_dgram_qp_to_rts(conn,  conn->local_qp_attr->psn);
-	}else{
-		if(connect_ctx(conn, conn->local_qp_attr->psn, 
-					conn->remote_qp_attr,index, COMMON_RONE)) {
-			fprintf(stderr, "Couldn't connect to remote QP\n");
-			exit(0);
+		//if(USE_WRITE){  
+		conn->peer_mr = (struct ibv_mr*)malloc(sizeof(struct ibv_mr));
+		n=recv(newsockfd, conn->peer_mr,sizeof(struct ibv_mr),0);
+		if (n < 0) die("ERROR reading from peer_mr");
+		n=send(newsockfd,conn->recv_mr, sizeof(struct ibv_mr),0);
+		if (n<0) die("ERROR writing send_r");   
+		// }
+
+		if(conn->send_transport == 2){
+			create_ah(conn, s_ctx->pd);
+			modify_dgram_qp_to_rts(conn,  conn->local_qp_attr->psn);
+		}else{
+			if(connect_ctx(conn, conn->local_qp_attr->psn, 
+						conn->remote_qp_attr,index, COMMON_RONE)) {
+				fprintf(stderr, "Couldn't connect to remote QP\n");
+				exit(0);
+			}
 		}
+		char buffer[128];
+		memset(buffer, 0, sizeof(buffer));
+		sprintf(buffer,"%s","OK");
+		n = send(newsockfd,buffer,sizeof(buffer),0);
+		if (n < 0) die("ERROR sending OK to socket");
+		close(newsockfd);
+
 	}
-	char buffer[128];
-	memset(buffer, 0, sizeof(buffer));
-	sprintf(buffer,"%s","OK");
-	n = send(newsockfd,buffer,sizeof(buffer),0);
-	if (n < 0) die("ERROR sending OK to socket");
-
-
-	close(newsockfd);
 	close(sockfd);
 	return ; 
 }
@@ -648,17 +646,17 @@ void run_client(int portno, char *hostname, struct connection *conn){
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
 		die("ERROR connecting");
 
-	n = send(sockfd,conn->local_qp_attr, S_QPA,0);
-	if (n < 0) 
-		die("ERROR writing to socket");
-//		print_qp_attr(conn->local_qp_attr);
-
 	conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
 	memset(conn->remote_qp_attr, 0, S_QPA);
 	n = recv(sockfd,conn->remote_qp_attr,S_QPA,0);
 	if (n < 0) 
 		die("ERROR reading from socket");
 //	print_qp_attr(conn->remote_qp_attr);
+	n = send(sockfd,conn->local_qp_attr, S_QPA,0);
+	if (n < 0) 
+		die("ERROR writing to socket");
+//		print_qp_attr(conn->local_qp_attr);
+
 
 	// if(USE_WRITE){
 	n=send(sockfd,conn->recv_mr, sizeof(struct ibv_mr),0);

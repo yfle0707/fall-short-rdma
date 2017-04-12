@@ -32,6 +32,7 @@
 #define ADD_SIZE 0
 #define COMMON_ROCE 0
 #define COMMON_RONE 1
+#define MAX_CONNECTIONS 100
 
 // Compare, print, and exit
 #define CPE(val, msg, err_code) \
@@ -76,7 +77,8 @@ struct context {
 	struct ibv_comp_channel *comp_channel;
 	struct ibv_comp_channel *send_comp_channel;
 	struct ibv_context *ctx;
-	struct connection *conn;
+	struct connection *conns[MAX_CONNECTIONS];
+	int nr_conns;
 	rudp_srv_state_t *srv_state;
 	rudp_cli_state_t *cli_state;
 	//struct qp_attr *local_qp_attr;
@@ -90,6 +92,7 @@ struct context {
 	//int num_sendcount;
 
 	uint64_t  recv_bytes;
+
 	pthread_t cq_poller_thread;
 	pthread_t send_cq_poller_thread;
 	pthread_t write_poller_thread;
@@ -104,7 +107,7 @@ struct context * init_ctx(struct ibv_device *dev, struct context *s_ctx);
 void modify_qp_to_init(struct connection *conn);
 void ud_modify_qp_to_init(struct connection *conn);
 struct context * build_context(struct ibv_context *verbs,struct context *s_ctx);
-void build_qp_attr(struct ibv_qp_init_attr *qp_attr, struct context *s_ctx);
+void build_qp_attr(struct ibv_qp_init_attr *qp_attr, struct connection *conn, struct context *s_ctx);
 /*static void * poll_cq(void *);
   static void * poll_send_cq(void *);
   static void * write_cq(void *);
@@ -112,7 +115,7 @@ void build_qp_attr(struct ibv_qp_init_attr *qp_attr, struct context *s_ctx);
 void record_timestamp(int count,  long long unsigned * start_timestamp);
 void check_timestamp_enable(struct ibv_context *ctx);
 void * throughput_timer(void *);
-void get_qp_info(struct context *s_ctx);
+void get_qp_info(struct context *s_ctx, struct connection *conn);
 uint16_t get_local_lid(struct ibv_context *ctx);
 union ibv_gid  get_gid(struct ibv_context *ctx);
 void set_memory(struct connection *ctx, struct context *s_ctx, int use_write, int key);

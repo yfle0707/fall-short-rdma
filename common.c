@@ -12,15 +12,15 @@
 
 #include "common.h"
 
-void get_qp_info(struct context *s_ctx){
+void get_qp_info(struct context *s_ctx, struct connection *conn){
 	union ibv_gid my_gid= get_gid(s_ctx->ctx);
 
-	s_ctx->conn->local_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
-	s_ctx->conn->local_qp_attr->gid_global_interface_id = my_gid.global.interface_id;
-	s_ctx->conn->local_qp_attr->gid_global_subnet_prefix = my_gid.global.subnet_prefix;
-	s_ctx->conn->local_qp_attr->lid                     = get_local_lid(s_ctx->ctx);
-	s_ctx->conn->local_qp_attr->qpn                     = s_ctx->conn->qp->qp_num;
-	s_ctx->conn->local_qp_attr->psn                     = lrand48() & 0xffffff;
+	conn->local_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
+	conn->local_qp_attr->gid_global_interface_id = my_gid.global.interface_id;
+	conn->local_qp_attr->gid_global_subnet_prefix = my_gid.global.subnet_prefix;
+	conn->local_qp_attr->lid                     = get_local_lid(s_ctx->ctx);
+	conn->local_qp_attr->qpn                     = conn->qp->qp_num;
+	conn->local_qp_attr->psn                     = lrand48() & 0xffffff;
 
 }
 
@@ -58,12 +58,8 @@ void check_timestamp_enable(struct ibv_context *ctx){
 struct context * init_ctx(struct ibv_device *ib_dev, struct context *s_ctx ){
 	struct ibv_context *ctx = ibv_open_device(ib_dev);
 	s_ctx = build_context(ctx,s_ctx);
-
+	s_ctx->nr_conns = 0;
 	//check_timestamp_enable(s_ctx->ctx);
-	struct connection *conn = (struct connection *)malloc(sizeof(struct connection)); 
-	conn->num_completions = 0;
-	conn->num_sendcount = 0;
-	s_ctx->conn = conn;
 	return s_ctx;
 }
 
@@ -280,20 +276,20 @@ struct context * build_context(struct ibv_context *verbs,struct context *s_ctx)
 	return s_ctx;
 }
 
-void build_qp_attr(struct ibv_qp_init_attr *qp_attr, struct context *s_ctx)
+void build_qp_attr(struct ibv_qp_init_attr *qp_attr, struct connection *conn, struct context *s_ctx)
 {
 	memset(qp_attr, 0, sizeof(*qp_attr));
 
 	qp_attr->send_cq = s_ctx->send_cq;
 	qp_attr->recv_cq = s_ctx->cq;
-	switch(s_ctx->conn->send_transport){
+	switch(conn->send_transport){
 		case 0: qp_attr->qp_type = IBV_QPT_RC; break;
 		case 1: qp_attr->qp_type = IBV_QPT_UC; break;
 		case 2: qp_attr->qp_type = IBV_QPT_UD; break;
 		default: printf("WRONG transport type!!\n"); break;
 	}
 
-	qp_attr->sq_sig_all = s_ctx->conn->signal_all;
+	qp_attr->sq_sig_all = conn->signal_all;
 
 	qp_attr->cap.max_inline_data = MAX_INLINE_SIZE;
 	qp_attr->cap.max_send_wr = MAX_SEND_WR;
@@ -569,15 +565,21 @@ int on_send(void *context, int sig)
 
 int on_disconnect(struct context *ctx)
 {
+	int i;
+	for(i=0;i<ctx->nr_conns;i++){
+		struct connection *conn= ctx->conns[i];
 
-	struct connection *conn= ctx->conn;
-//	printf("peer disconnected.\n");
+		if (ibv_destroy_qp(conn->qp)) {
+			fprintf(stderr, "Couldn't destroy connected QP\n");
+			return 1;
+		}
 
-	//  rdma_destroy_qp(id);
-	
-	if (ibv_destroy_qp(ctx->conn->qp)) {
-		fprintf(stderr, "Couldn't destroy connected QP\n");
-		return 1;
+		//	printf("peer disconnected.2\n");
+		ibv_dereg_mr(conn->send_mr);
+		ibv_dereg_mr(conn->recv_mr);
+
+		free(conn);
+
 	}
 //	printf("peer disconnected.0\n");
 	if (ibv_destroy_cq(ctx->cq)) {
@@ -589,10 +591,6 @@ int on_disconnect(struct context *ctx)
 		fprintf(stderr, "Couldn't destroy connected RECV CQ\n");
 		return 1;
 	}	
-//	printf("peer disconnected.2\n");
-	ibv_dereg_mr(conn->send_mr);
-	ibv_dereg_mr(conn->recv_mr);
-
 	
 	if (ibv_dealloc_pd(ctx->pd)) {
 		fprintf(stderr, "Couldn't deallocate PD\n");
@@ -613,7 +611,6 @@ int on_disconnect(struct context *ctx)
 	//free(conn->send_region);
 	//free(conn->recv_region);
 
-	free(conn);
 	free(ctx);
 	//  rdma_destroy_id(id);
 	return 0;
