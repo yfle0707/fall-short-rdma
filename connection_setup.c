@@ -61,18 +61,18 @@ int rate_limit_mode=1;
 long long unsigned syntime;
 
 
-#define MAX_NUM_IB_THREADS	16
-struct context *multi_ctx[MAX_NUM_IB_THREADS];
-pthread_t ib_threads[MAX_NUM_IB_THREADS/2];
-char *hosts[MAX_NUM_IB_THREADS]={NULL};
-pthread_t latency_threads[MAX_NUM_IB_THREADS/2];
+#define MAX_CPUS	16
+struct context *multi_ctx[MAX_CPUS];
+pthread_t ib_threads[MAX_CPUS/2];
+char *hosts[MAX_CPUS]={NULL};
+pthread_t latency_threads[MAX_CPUS/2];
 
-uint64_t lats[MAX_NUM_IB_THREADS/2][MAX_TIMESTAMP_SIZE];
-pthread_t server_thread[MAX_NUM_IB_THREADS];
-
-int nflows[MAX_NUM_IB_THREADS];
-
-/*static sigjmp_buf jmp_alarm[MAX_NUM_IB_THREADS];
+uint64_t lats[MAX_CPUS/2][MAX_TIMESTAMP_SIZE];
+//pthread_t server_thread[MAX_CPUS];
+int total_flows;
+int nflows[MAX_CPUS];
+int done[MAX_CPUS];
+/*static sigjmp_buf jmp_alarm[MAX_CPUS];
 static void 
 sigalarm_handler (int signo)
 {
@@ -86,7 +86,7 @@ sigalarm_handler (int signo)
 void parseOpt(int argc, char **argv){
 	int c; 
 	int i=0;	
-	while ((c = getopt(argc, argv, "s:m:n:c:b:h:p:e:d:M:S:R:")) != -1) {
+	while ((c = getopt(argc, argv, "s:m:n:c:b:h:p:e:d:M:S:R:f:")) != -1) {
 		switch (c)
 		{
 			case 'm':
@@ -115,7 +115,7 @@ void parseOpt(int argc, char **argv){
 					char *hostnames = strtok(optarg,",");
 
 					while(hostnames){
-						if(i>=MAX_NUM_IB_THREADS)
+						if(i>=MAX_CPUS)
 							die("the number of clients is larger than the max");
 						hosts[i++]= hostnames;
 						hostnames=strtok(NULL, ",");
@@ -146,6 +146,9 @@ void parseOpt(int argc, char **argv){
 				break;
 			case 'M':
 				num_threads = atoi(optarg);
+				break;
+			case 'f':
+				total_flows = atoi(optarg);
 				break;
 			default:
 				fprintf(stderr, "usage: %s -m<message_size> -n<num_send_request> -s<signaled>  -e<event_mode> -h<host_ip> -c<is_client> -p<port_no> -M<num_threads> -b<internal_port_no> -R<rate_limit_mode>\n", argv[0]);
@@ -424,9 +427,24 @@ int main(int argc, char **argv)
 	struct ibv_device **dev_list = ibv_get_device_list(NULL) ;
 	ib_dev = dev_list[0];
 
+	int i;
 	memset(lats, 0 ,sizeof(lats));
-	int index,i;
-	for(index=0;index<(num_threads);index++){
+        int flow_per_thread = total_flows / num_threads;
+        int flow_remainder_cnt = total_flows % num_threads;
+        for (i = 0; i < num_threads; i++) {
+                done[i] = FALSE;
+                nflows[i] = flow_per_thread;
+
+                if (flow_remainder_cnt-- > 0)
+                        nflows[i]++;
+
+                if (nflows[i] == 0)
+                        continue;
+
+	}
+
+
+	for(i=0;i<(num_threads);i++){
 		if(is_client == 0){
 	       		if (pthread_create(&latency_threads[i],
                                         NULL, RunServer, (void *)i)) {
