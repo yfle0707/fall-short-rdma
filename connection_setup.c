@@ -603,7 +603,7 @@ void * RunServer(void *arg)
 		//memset(s_ctx->remote_qp_attr, 0, S_QPA);
 		init_connection(s_ctx, s_ctx->nr_conns);
 		//printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
-		struct connection *conn= s_ctx->conns[s_ctx->nr_conns];
+		struct connection *conn= s_ctx->conns[s_ctx->nr_conns-1];
 		//s_ctx->nr_conns++;
 
 		//print_qp_attr(conn->remote_qp_attr);
