@@ -82,6 +82,9 @@ sigalarm_handler (int signo)
 		siglongjmp(jmp_alarm[i], 1);
 }*/
 
+static long long unsigned memory_reg[MAX_CPUS][1000];
+static long long unsigned qp_init[MAX_CPUS][1000];
+static long long unsigned qp_transition[MAX_CPUS][1000];
 
 void parseOpt(int argc, char **argv){
 	int c; 
@@ -169,6 +172,32 @@ void parseOpt(int argc, char **argv){
 		exit(-1);
 	}
 }
+
+void PrintConnection(){
+        int core=0, i=0;
+        printf("memory_reg:\n");
+        for(core=0; core< num_threads; core++){
+                for (i=0;i<nflows[core];i++){
+                        printf("- [%d, %llu]\n", core, memory_reg[core][i]);
+                }
+        }
+        printf("qp_init:\n");
+        for(core=0; core< num_threads; core++){
+                for (i=0;i<nflows[core];i++){
+                        printf("- [%d, %llu]\n", core, qp_init[core][i]);
+                }
+        }
+        printf("qp_transition:\n");
+        for(core=0; core< num_threads; core++){
+                for (i=0;i<nflows[core];i++){
+                        printf("- [%d, %llu]\n", core, qp_transition[core][i]);
+                }
+        }
+
+
+}
+
+
 
 static void * latency_measure(void * arg){
 	int wait_for_acks_ret;
@@ -356,7 +385,8 @@ void init_connection(struct context *s_ctx, int index){
 #ifdef REGESTER_MEMORY_MEASURE	
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-	printf("memory register time %llu us\n", diff / 1000);
+	//printf("memory register time %llu us\n", diff / 1000);
+	memory_reg[s_ctx->core][index] = diff / 1000;	
 #endif
 	//queue pair initilization
 
@@ -372,7 +402,8 @@ void init_connection(struct context *s_ctx, int index){
 #ifdef QP_INIT_MEASURE
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-	printf("queue pair init time %llu us\n", diff / 1000);
+	//printf("queue pair init time %llu us\n", diff / 1000);
+	qp_init[s_ctx->core][index] = diff /1000;
 #endif
 
 
@@ -385,6 +416,7 @@ void RunMain(void *arg){
 	int index = (int*)arg;
 	int target = nflows[index];
 	s_ctx = init_ctx(ib_dev,s_ctx);
+	s_ctx->core = index;
 	multi_ctx[index] = s_ctx;		
 
 	for(i=0;i<nflows[index];i++){
@@ -404,8 +436,8 @@ void RunMain(void *arg){
 #ifdef QP_CONNECT_MEASURE
 		clock_gettime(CLOCK_MONOTONIC, &end);
 		diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-		printf("queue pair connection time %llu us\n", diff / 1000);
-
+//		printf("queue pair connection time %llu us\n", diff / 1000);
+		qp_transition[s_ctx->core][i] = diff / 1000;
 #endif
 
 
@@ -465,6 +497,7 @@ int main(int argc, char **argv)
 		if(pthread_join(latency_threads[i], NULL) !=0 )
 			die("main(): Join failed for worker thread i");
 
+	PrintConnection();
 	for(i=0;i<num_threads;i++)
 		on_disconnect(multi_ctx[i]);
 	
@@ -572,6 +605,7 @@ void * RunServer(void *arg)
 	struct context *s_ctx;
 	int i;
 	s_ctx = init_ctx(ib_dev,s_ctx);
+	s_ctx->core = index;
 	multi_ctx[index] = s_ctx;		
 
 

@@ -90,7 +90,7 @@ struct context {
 	//char *send_region;
 	//int num_completions;
 	//int num_sendcount;
-
+	int core;
 	uint64_t  recv_bytes;
 
 	//pthread_t cq_poller_thread;
