@@ -623,7 +623,7 @@ void * RunServer(void *arg)
 	serv_addr.sin_port = htons(portno);
 	if (bind(sockfd, (struct sockaddr *) &serv_addr,
 				sizeof(serv_addr)) < 0) 
-		die("ERROR on binding");
+		CPE(1, "ERROR on binding", portno);
 	while(1){
 		listen(sockfd,1024);
 
