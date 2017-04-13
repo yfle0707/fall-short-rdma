@@ -63,11 +63,9 @@ long long unsigned syntime;
 
 #define MAX_CPUS	16
 struct context *multi_ctx[MAX_CPUS];
-pthread_t ib_threads[MAX_CPUS/2];
 char *hosts[MAX_CPUS]={NULL};
-pthread_t latency_threads[MAX_CPUS/2];
-
-uint64_t lats[MAX_CPUS/2][MAX_TIMESTAMP_SIZE];
+pthread_t latency_threads[MAX_CPUS];
+static uint32_t lats[MAX_CPUS][1000];
 //pthread_t server_thread[MAX_CPUS];
 int total_flows;
 int nflows[MAX_CPUS];
@@ -167,10 +165,10 @@ void parseOpt(int argc, char **argv){
 		printf("please only specify one parameter, either num_requests or duration\n");
 		exit(-1);
 	}
-	if(is_client == 1 && num_threads > i){
+/*	if(is_client == 1 && num_threads > i){
 		printf("thread number is larger than server number!!\n");
 		exit(-1);
-	}
+	}*/
 }
 
 void PrintConnection(){
@@ -385,7 +383,7 @@ void init_connection(struct context *s_ctx, int index){
 #ifdef REGESTER_MEMORY_MEASURE	
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-	//printf("memory register time %llu us\n", diff / 1000);
+//	fprintf(stderr, "core %d, flow index %d, time %llu us\n",s_ctx->core, index, diff / 1000);
 	memory_reg[s_ctx->core][index] = diff / 1000;	
 #endif
 	//queue pair initilization
@@ -414,12 +412,14 @@ void RunMain(void *arg){
 	s_ctx = NULL;
 	int i;
 	int index = (int*)arg;
-	int target = nflows[index];
+//	int target = nflows[index];
 	s_ctx = init_ctx(ib_dev,s_ctx);
 	s_ctx->core = index;
 	multi_ctx[index] = s_ctx;		
 
+	//printf("core %d,# of flows: %d\n", s_ctx->core, nflows[index]);
 	for(i=0;i<nflows[index];i++){
+		//printf("core %d, %d flow\n", s_ctx->core, i);
 		init_connection(s_ctx,i);
 	}
 	for(i=0;i<nflows[index];i++){
@@ -439,8 +439,6 @@ void RunMain(void *arg){
 //		printf("queue pair connection time %llu us\n", diff / 1000);
 		qp_transition[s_ctx->core][i] = diff / 1000;
 #endif
-
-
 	}
 
 }
@@ -460,7 +458,6 @@ int main(int argc, char **argv)
 	ib_dev = dev_list[0];
 
 	int i;
-	memset(lats, 0 ,sizeof(lats));
         int flow_per_thread = total_flows / num_threads;
         int flow_remainder_cnt = total_flows % num_threads;
         for (i = 0; i < num_threads; i++) {
