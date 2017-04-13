@@ -610,7 +610,6 @@ void * RunServer(void *arg)
 
 
 	//init tcp
-	printf("portno %d\n", portno+index);
 	struct sockaddr_in serv_addr, cli_addr;
 	int n;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -620,13 +619,15 @@ void * RunServer(void *arg)
 	//portno = atoi(argv[1]);
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	serv_addr.sin_port = htons(portno);
-	if (bind(sockfd, (struct sockaddr *) &serv_addr,
-				sizeof(serv_addr)) < 0) 
-		CPE(1, "ERROR on binding", portno);
-	while(1){
-		listen(sockfd,1024);
+	serv_addr.sin_port = htons(portno+index);
+	printf("portno %d\n", portno+index);
+	int ret = bind(sockfd, (struct sockaddr *) &serv_addr,
+				sizeof(serv_addr)); 
+	if (ret < 0) 
+		CPE(1, "ERROR on binding", ret);
+	listen(sockfd,1024);
 
+	while(1){
 		clilen = sizeof(cli_addr);
 		newsockfd = accept(sockfd, 
 				(struct sockaddr *) &cli_addr, 
