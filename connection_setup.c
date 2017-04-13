@@ -425,8 +425,8 @@ int main(int argc, char **argv)
 	ib_dev = dev_list[0];
 
 	memset(lats, 0 ,sizeof(lats));
-	int index,i;
-	for(index=0;index<(num_threads);index++){
+	int i;
+	for(i=0;i<(num_threads);i++){
 		if(is_client == 0){
 	       		if (pthread_create(&latency_threads[i],
                                         NULL, RunServer, (void *)i)) {
@@ -444,7 +444,7 @@ int main(int argc, char **argv)
 
 	}
 	for( i= 0; i < num_threads; i++)
-		if(pthread_join(ib_threads[i], NULL) !=0 )
+		if(pthread_join(latency_threads[i], NULL) !=0 )
 			die("main(): Join failed for worker thread i");
 
 	
@@ -547,6 +547,7 @@ void * RunServer(void *arg)
 	socklen_t clilen;
 	int index = (int) arg;
 
+	printf("index %d\n", index);
 	//init rdma context 
 	struct context *s_ctx;
 	int i;
