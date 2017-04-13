@@ -337,7 +337,7 @@ void init_connection(struct context *s_ctx, int index){
 	conn->num_sendcount = 0;
 
 	s_ctx->conns[index] = conn;
-//	s_ctx->nr_conns ++;
+	s_ctx->nr_conns ++;
 	//initilize connection
 	conn->send_message_size = send_message_size;
 	conn->num_requests = num_send_request;
@@ -387,9 +387,9 @@ void RunMain(void *arg){
 	s_ctx = init_ctx(ib_dev,s_ctx);
 	multi_ctx[index] = s_ctx;		
 
-	for(i=0;i<nflows[index];i++)
+	for(i=0;i<nflows[index];i++){
 		init_connection(s_ctx,i);
-
+	}
 	for(i=0;i<nflows[index];i++){
 		run_client(portno+index,hosts[0],s_ctx->conns[i]);
 #ifdef QP_CONNECT_MEASURE
@@ -604,7 +604,7 @@ void * RunServer(void *arg)
 		init_connection(s_ctx, s_ctx->nr_conns);
 		//printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
 		struct connection *conn= s_ctx->conns[s_ctx->nr_conns];
-		s_ctx->nr_conns++;
+		//s_ctx->nr_conns++;
 
 		//print_qp_attr(conn->remote_qp_attr);
 
