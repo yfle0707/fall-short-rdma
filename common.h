@@ -93,10 +93,10 @@ struct context {
 
 	uint64_t  recv_bytes;
 
-	pthread_t cq_poller_thread;
-	pthread_t send_cq_poller_thread;
-	pthread_t write_poller_thread;
-	pthread_t throughput_timer_thread;
+	//pthread_t cq_poller_thread;
+	//pthread_t send_cq_poller_thread;
+	//pthread_t write_poller_thread;
+	//pthread_t throughput_timer_thread;
 };
 
 
