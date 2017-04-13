@@ -465,6 +465,8 @@ int main(int argc, char **argv)
 		if(pthread_join(latency_threads[i], NULL) !=0 )
 			die("main(): Join failed for worker thread i");
 
+	for(i=0;i<num_threads;i++)
+		on_disconnect(multi_ctx[i]);
 	
 }
 
