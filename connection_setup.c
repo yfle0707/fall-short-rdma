@@ -45,7 +45,7 @@ void *run_rone_server(void *arg);
 //long long unsigned endtimestamp[MAX_TIMESTAMP_SIZE];
 
 int send_message_size = 2048;
-int num_send_request =0;
+int num_send_request =1;
 int signaled=0;
 //int cpu_id=0;
 int portno=55281;
@@ -201,7 +201,6 @@ static void * latency_measure(void * arg){
 	int wait_for_acks_ret;
 	int index = (int) arg;
 
-	bindingCPU(index);
 	struct context *s_ctx=multi_ctx[index];
 	struct connection *conn = s_ctx->conns[index];
 	conn->send_message_size = 0;
@@ -269,27 +268,6 @@ static void * incast(void * arg){
 			st = start.tv_sec*BILLION + start.tv_nsec;
 		}
 	}
-	if(duration > 0){	
-	//	clock_gettime(CLOCK_MONOTONIC, &end);
-	//	dur =end.tv_sec - start.tv_sec;
-		
-		/*if(sigsetjmp(jmp_alarm[index],1)!=0){
-			printf("jmp buf @index: %d\n", index);
-			goto end_sending;
-		}
-	//	if(index == 0)
-	//		alarm(duration);
-		struct itimerval timer;
-		timer.it_interval.tv_sec = 0;
-		timer.it_interval.tv_usec = 0;
-		timer.it_value.tv_sec = duration;// (ivl / USEC_IN_SEC);
-		timer.it_value.tv_usec = 0;//(ivl % USEC_IN_SEC);
-		setitimer(ITIMER_REAL, &timer, 0);*/
-
-	}
-	//sleep(30);
-	//printf("start sending %d\n", index);
-
 
 	int k;
 
@@ -371,8 +349,8 @@ void init_connection(struct context *s_ctx, int index){
 	conn->send_transport = RC_TRANSPORT;
 	conn->signal_all = signaled;
 	conn->isClient= is_client;
+	conn->flowid = index;
 
-	conn->actual_completions =0;
 	struct timespec start, end;
 	long long unsigned diff;
 #ifdef REGESTER_MEMORY_MEASURE	
@@ -411,7 +389,10 @@ void RunMain(void *arg){
 	struct context *s_ctx;
 	s_ctx = NULL;
 	int i;
+
 	int index = (int*)arg;
+
+	bindingCPU(index);
 //	int target = nflows[index];
 	s_ctx = init_ctx(ib_dev,s_ctx);
 	s_ctx->core = index;
@@ -439,8 +420,45 @@ void RunMain(void *arg){
 //		printf("queue pair connection time %llu us\n", diff / 1000);
 		qp_transition[s_ctx->core][i] = diff / 1000;
 #endif
+		on_write_read(s_ctx,s_ctx->conns[i],1, OPERATOR, COMMON_ROCE);
 	}
+	
+	while(!done[index]){
+		void *ev_ctx;
+		struct ibv_cq *cq;
+		int polling_size = queue_depth;
+		struct ibv_exp_wc wc[polling_size];
+		int k=0;
+		int ack_i;
+		do{
+			if(event_mode == 1 || is_client == 0){
+				TEST_NZ(ibv_get_cq_event(s_ctx->send_comp_channel, &cq, &ev_ctx));
+				ibv_ack_cq_events(cq, polling_size);
+				TEST_NZ(ibv_req_notify_cq(cq, 0));
+				k = ibv_exp_poll_cq(cq, polling_size, wc, sizeof(wc[0]));
+			}else
+				k = ibv_exp_poll_cq(s_ctx->send_cq, queue_depth, wc, sizeof(wc[0]));
+		}while(k<=0);
 
+		for(ack_i=0; ack_i< k; ack_i++){
+			if (wc[ack_i].status != IBV_WC_SUCCESS){
+				fprintf(stderr," wrong wc->status: %s, opcode %s\n",
+						ibv_wc_status_str(wc[ack_i].status), ibv_wc_opcode_str(wc[ack_i].exp_opcode));
+				fprintf(stderr,"unsuccessful connection\n");
+				k=0;
+				break;
+			}
+			struct connection *conn = (struct connection *)wc[ack_i].wr_id;
+			//printf("flow id %d at core %d\n", conn->flowid, index);
+			conn->num_sendcount++;
+			if(conn->num_sendcount == conn->num_requests)
+				s_ctx->nr_compeletes++;
+			else
+				on_write_read(s_ctx, conn, 1, OPERATOR, COMMON_ROCE);
+		}
+		if(s_ctx->nr_conns == s_ctx->nr_compeletes)
+			done[index] = TRUE;
+	}
 }
 
 

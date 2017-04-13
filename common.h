@@ -60,10 +60,10 @@ struct connection {
 	int send_transport;
 	int window_size;
 	int signal_all;
-	int actual_completions;
+//	int actual_completions;
 
- 	int server_socketfd;	
 	struct ibv_mr *peer_mr;
+	int flowid;
 };
 
 struct context {
@@ -79,6 +79,7 @@ struct context {
 	struct ibv_context *ctx;
 	struct connection *conns[MAX_CONNECTIONS];
 	int nr_conns;
+	int nr_compeletes;
 	rudp_srv_state_t *srv_state;
 	rudp_cli_state_t *cli_state;
 	//struct qp_attr *local_qp_attr;
