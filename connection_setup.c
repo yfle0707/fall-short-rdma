@@ -337,7 +337,7 @@ void init_connection(struct context *s_ctx, int index){
 	conn->num_sendcount = 0;
 
 	s_ctx->conns[index] = conn;
-	s_ctx->nr_conns ++;
+//	s_ctx->nr_conns ++;
 	//initilize connection
 	conn->send_message_size = send_message_size;
 	conn->num_requests = num_send_request;
@@ -590,10 +590,10 @@ void * RunServer(void *arg)
 	if (bind(sockfd, (struct sockaddr *) &serv_addr,
 				sizeof(serv_addr)) < 0) 
 		die("ERROR on binding");
-	listen(sockfd,5);
-
-	clilen = sizeof(cli_addr);
 	while(1){
+		listen(sockfd,1024);
+
+		clilen = sizeof(cli_addr);
 		newsockfd = accept(sockfd, 
 				(struct sockaddr *) &cli_addr, 
 				&clilen);
@@ -602,14 +602,15 @@ void * RunServer(void *arg)
 
 		//memset(s_ctx->remote_qp_attr, 0, S_QPA);
 		init_connection(s_ctx, s_ctx->nr_conns);
+		//printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
 		struct connection *conn= s_ctx->conns[s_ctx->nr_conns];
 		s_ctx->nr_conns++;
 
 		//print_qp_attr(conn->remote_qp_attr);
 
+		//print_qp_attr(conn->local_qp_attr);
 		n = send(newsockfd,conn->local_qp_attr,S_QPA,0);
 		if (n < 0) die("ERROR writing to socket");
-		//print_qp_attr(conn->local_qp_attr);
 		conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
 		n = recv(newsockfd,conn->remote_qp_attr,S_QPA,0);
 		if (n < 0) die("ERROR reading from socket");
