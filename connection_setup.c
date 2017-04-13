@@ -462,7 +462,7 @@ int main(int argc, char **argv)
 
 	}
 	for( i= 0; i < num_threads; i++)
-		if(pthread_join(ib_threads[i], NULL) !=0 )
+		if(pthread_join(latency_threads[i], NULL) !=0 )
 			die("main(): Join failed for worker thread i");
 
 	
@@ -565,6 +565,7 @@ void * RunServer(void *arg)
 	socklen_t clilen;
 	int index = (int) arg;
 
+	printf("index %d\n", index);
 	//init rdma context 
 	struct context *s_ctx;
 	int i;
