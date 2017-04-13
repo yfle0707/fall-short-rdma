@@ -367,7 +367,6 @@ void init_connection(struct context *s_ctx, int index){
 	build_qp_attr(&qp_attr,conn, s_ctx);  
 	TEST_Z(conn->qp = ibv_create_qp(s_ctx->pd, &qp_attr));
 	get_qp_info(s_ctx, conn);
-	print_qp_attr(conn->local_qp_attr);
 	modify_qp_to_init(conn);
 
 #ifdef QP_INIT_MEASURE
@@ -601,13 +600,13 @@ void * RunServer(void *arg)
 
 		//memset(s_ctx->remote_qp_attr, 0, S_QPA);
 		init_connection(s_ctx, s_ctx->nr_conns);
-		printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
+		//printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
 		struct connection *conn= s_ctx->conns[s_ctx->nr_conns];
 		s_ctx->nr_conns++;
 
 		//print_qp_attr(conn->remote_qp_attr);
 
-		print_qp_attr(conn->local_qp_attr);
+		//print_qp_attr(conn->local_qp_attr);
 		n = send(newsockfd,conn->local_qp_attr,S_QPA,0);
 		if (n < 0) die("ERROR writing to socket");
 		conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
