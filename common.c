@@ -343,10 +343,10 @@ void set_memory(struct connection *conn, struct context *s_ctx, int USE_WRITE, i
 	
 	conn->recv_region = (char *)shmat(sid, 0, 0);*/
 	
-	conn->recv_region = alloc_raw_pages(2, RECV_BUFFER_SIZE/2);
+	//conn->recv_region = alloc_raw_pages(2, RECV_BUFFER_SIZE/2);
 	//server_req_area_mr = ibv_reg_mr(cb->pd, (char *)server_req_area, M_2, FLAGS);
 	//CPE(!server_req_area_mr, "Failed to register server's request area", errno);
-	//conn->recv_region = (char *)malloc(RECV_BUFFER_SIZE);
+	conn->recv_region = (char *)malloc(RECV_BUFFER_SIZE);
 
 	if(!conn->recv_region){
 		printf("malloc recv memory fails\n");
@@ -365,7 +365,8 @@ void set_memory(struct connection *conn, struct context *s_ctx, int USE_WRITE, i
 	CPE(sid < 0, "Master server request area shmget() failed\n", sid);
 
 	conn->send_region = (char *)shmat(sid, 0, 0);*/
-	conn->send_region = alloc_raw_pages(2, RECV_BUFFER_SIZE/2);
+	//conn->send_region = alloc_raw_pages(2, RECV_BUFFER_SIZE/2);
+	conn->send_region = (char *)malloc(RECV_BUFFER_SIZE);
 	if(!conn->send_region){
 		printf("malloc send memory fails\n");
 		exit(-1);

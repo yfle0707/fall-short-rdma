@@ -422,7 +422,11 @@ void RunMain(void *arg){
 #endif
 		on_write_read(s_ctx,s_ctx->conns[i],1, OPERATOR, COMMON_ROCE);
 	}
-	
+	struct timespec start, end;
+	long long unsigned diff;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
+		
 	while(!done[index]){
 		void *ev_ctx;
 		struct ibv_cq *cq;
@@ -456,8 +460,14 @@ void RunMain(void *arg){
 			else
 				on_write_read(s_ctx, conn, 1, OPERATOR, COMMON_ROCE);
 		}
-		if(s_ctx->nr_conns == s_ctx->nr_compeletes)
+		if(s_ctx->nr_conns == s_ctx->nr_compeletes){
+			clock_gettime(CLOCK_MONOTONIC, &end);
+			diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+			printf("throughput %d \n", num_send_request*send_message_size * s_ctx->nr_compeletes * 8.0/ diff );
+
+			
 			done[index] = TRUE;
+		}
 	}
 }
 
@@ -512,7 +522,7 @@ int main(int argc, char **argv)
 		if(pthread_join(latency_threads[i], NULL) !=0 )
 			die("main(): Join failed for worker thread i");
 
-	PrintConnection();
+	//PrintConnection();
 	for(i=0;i<num_threads;i++)
 		on_disconnect(multi_ctx[i]);
 	
