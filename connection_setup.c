@@ -70,6 +70,9 @@ static uint32_t lats[MAX_CPUS][1000];
 int total_flows;
 int nflows[MAX_CPUS];
 int done[MAX_CPUS];
+	struct timespec main_start, main_end;
+
+
 /*static sigjmp_buf jmp_alarm[MAX_CPUS];
 static void 
 sigalarm_handler (int signo)
@@ -425,7 +428,7 @@ void RunMain(void *arg){
 	struct timespec start, end;
 	long long unsigned diff;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-
+	main_start = start;
 		
 	while(!done[index]){
 		void *ev_ctx;
@@ -462,8 +465,11 @@ void RunMain(void *arg){
 		}
 		if(s_ctx->nr_conns == s_ctx->nr_compeletes){
 			clock_gettime(CLOCK_MONOTONIC, &end);
-			diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-			printf("throughput %d \n", num_send_request*send_message_size * s_ctx->nr_compeletes * 8.0/ diff );
+			double tot_time = (double)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+			long unsigned read_bytes = (long unsigned)num_send_request*send_message_size * s_ctx->nr_compeletes;
+			double bandwidth = read_bytes * 8.0/tot_time;
+			printf("- [%.9g, %lu, %.9g, %d]\n", tot_time / BILLION,read_bytes, bandwidth, s_ctx->nr_compeletes);
+
 
 			
 			done[index] = TRUE;
@@ -522,6 +528,12 @@ int main(int argc, char **argv)
 		if(pthread_join(latency_threads[i], NULL) !=0 )
 			die("main(): Join failed for worker thread i");
 
+	clock_gettime(CLOCK_MONOTONIC, &main_end);
+	double diff0 = (double)(BILLION * (main_end.tv_sec - main_start.tv_sec) + main_end.tv_nsec - main_start.tv_nsec);
+	long unsigned read_bytes = (long unsigned)num_send_request*send_message_size * total_flows ;
+	double bandwidth =  read_bytes *8.0/ diff0;
+
+	printf("- [%.9g, %lu, %.9g, %d]\n", diff0/BILLION, read_bytes, bandwidth, total_flows);
 	//PrintConnection();
 	for(i=0;i<num_threads;i++)
 		on_disconnect(multi_ctx[i]);
