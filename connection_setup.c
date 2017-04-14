@@ -54,7 +54,7 @@ int is_client=0;
 int event_mode = 0;
 int duration=0;
 int num_threads=1;
-int queue_depth=16;
+int queue_depth=1024;
 
 int is_sync=0;
 int rate_limit_mode=1;
@@ -456,7 +456,7 @@ void RunMain(void *arg){
 				break;
 			}
 			struct connection *conn = (struct connection *)wc[ack_i].wr_id;
-			//printf("flow id %d at core %d\n", conn->flowid, index);
+			printf("flow id %d at core %d, sendcount %d\n", conn->flowid, index, conn->num_sendcount);
 			conn->num_sendcount++;
 			if(conn->num_sendcount == conn->num_requests)
 				s_ctx->nr_compeletes++;
@@ -674,7 +674,7 @@ void * RunServer(void *arg)
 
 		//memset(s_ctx->remote_qp_attr, 0, S_QPA);
 		init_connection(s_ctx, s_ctx->nr_conns);
-		//printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
+		printf("s_ctx->nr_conns %d\n", s_ctx->nr_conns);
 		struct connection *conn= s_ctx->conns[s_ctx->nr_conns-1];
 		//s_ctx->nr_conns++;
 
