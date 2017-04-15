@@ -60,12 +60,12 @@ struct context * init_ctx(struct ibv_device *ib_dev, struct context *s_ctx ){
 	struct ibv_device_attr device_attr;
 	int rc;
 
-	rc = ibv_query_device(ctx, &device_attr);
+/*	rc = ibv_query_device(ctx, &device_attr);
 	if (rc) {
 		fprintf(stderr, "Error, failed to query the device attributes\n");
 		return NULL; 
 	}
-	printf("max_qp %d, max_cqe %d, max_qp_wr %d\n",device_attr.max_qp, device_attr.max_cqe, device_attr.max_qp_wr);
+	printf("max_qp %d, max_cqe %d, max_qp_wr %d\n",device_attr.max_qp, device_attr.max_cqe, device_attr.max_qp_wr);*/
 	s_ctx = build_context(ctx,s_ctx);
 	s_ctx->nr_conns = 0;
 	//check_timestamp_enable(s_ctx->ctx);

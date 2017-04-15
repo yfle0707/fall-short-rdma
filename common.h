@@ -64,6 +64,7 @@ struct connection {
 
 	struct ibv_mr *peer_mr;
 	int flowid;
+	int done;
 };
 
 struct context {
@@ -79,7 +80,8 @@ struct context {
 	struct ibv_context *ctx;
 	struct connection *conns[MAX_CONNECTIONS];
 	int nr_conns;
-	int nr_compeletes;
+	int nr_completes;
+	int nr_errors;
 	rudp_srv_state_t *srv_state;
 	rudp_cli_state_t *cli_state;
 	//struct qp_attr *local_qp_attr;

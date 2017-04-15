@@ -16,4 +16,5 @@
 
 void bindingCPU(int num);
 void die(const char *reason);
+double get_nsecs(struct timespec time);
 

@@ -353,7 +353,7 @@ void init_connection(struct context *s_ctx, int index){
 	conn->signal_all = signaled;
 	conn->isClient= is_client;
 	conn->flowid = index;
-
+	conn->done = FALSE;
 	struct timespec start, end;
 	long long unsigned diff;
 #ifdef REGESTER_MEMORY_MEASURE	
@@ -403,7 +403,7 @@ void RunMain(void *arg){
 
 	//printf("core %d,# of flows: %d\n", s_ctx->core, nflows[index]);
 	for(i=0;i<nflows[index];i++){
-		//printf("core %d, %d flow\n", s_ctx->core, i);
+	//	printf("core %d, %d flow\n", s_ctx->core, i);
 		init_connection(s_ctx,i);
 	}
 	for(i=0;i<nflows[index];i++){
@@ -428,8 +428,10 @@ void RunMain(void *arg){
 	struct timespec start, end;
 	long long unsigned diff;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	main_start = start;
-		
+	if(get_nsecs(main_start) == 0)
+		main_start = start;
+
+	s_ctx->nr_completes = s_ctx->nr_errors = 0;		
 	while(!done[index]){
 		void *ev_ctx;
 		struct ibv_cq *cq;
@@ -446,29 +448,37 @@ void RunMain(void *arg){
 			}else
 				k = ibv_exp_poll_cq(s_ctx->send_cq, queue_depth, wc, sizeof(wc[0]));
 		}while(k<=0);
-
+		//printf("core %d, receive %d\n", index, k);
 		for(ack_i=0; ack_i< k; ack_i++){
 			if (wc[ack_i].status != IBV_WC_SUCCESS){
 				fprintf(stderr," wrong wc->status: %s, opcode %s\n",
 						ibv_wc_status_str(wc[ack_i].status), ibv_wc_opcode_str(wc[ack_i].exp_opcode));
-				fprintf(stderr,"unsuccessful connection\n");
-				k=0;
-				break;
+				struct connection *conn = (struct connection *)wc[ack_i].wr_id;
+				if(!conn->done){
+					conn->done = TRUE;
+					s_ctx->nr_errors++;
+				}
+				continue;
 			}
 			struct connection *conn = (struct connection *)wc[ack_i].wr_id;
-			printf("flow id %d at core %d, sendcount %d\n", conn->flowid, index, conn->num_sendcount);
 			conn->num_sendcount++;
+			//printf("flow id %d at core %d, sendcount %d\n", conn->flowid, index, conn->num_sendcount);
 			if(conn->num_sendcount == conn->num_requests)
-				s_ctx->nr_compeletes++;
+				s_ctx->nr_completes++;
 			else
 				on_write_read(s_ctx, conn, 1, OPERATOR, COMMON_ROCE);
 		}
-		if(s_ctx->nr_conns == s_ctx->nr_compeletes){
+		if(s_ctx->nr_conns == (s_ctx->nr_completes+s_ctx->nr_errors)){
+
 			clock_gettime(CLOCK_MONOTONIC, &end);
 			double tot_time = (double)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
-			long unsigned read_bytes = (long unsigned)num_send_request*send_message_size * s_ctx->nr_compeletes;
+			long unsigned read_bytes = 0;
+			for(i=0;i<s_ctx->nr_conns;i++){
+				read_bytes += (long unsigned) s_ctx->conns[i]->num_sendcount * send_message_size; 
+			}
+			s_ctx->recv_bytes = read_bytes;
 			double bandwidth = read_bytes * 8.0/tot_time;
-			printf("- [%.9g, %lu, %.9g, %d]\n", tot_time / BILLION,read_bytes, bandwidth, s_ctx->nr_compeletes);
+			printf("- [%.9g, %lu, %.9g, %d, %d]\n", tot_time / BILLION,read_bytes, bandwidth, s_ctx->nr_completes, s_ctx->nr_errors);
 
 
 			
@@ -530,7 +540,10 @@ int main(int argc, char **argv)
 
 	clock_gettime(CLOCK_MONOTONIC, &main_end);
 	double diff0 = (double)(BILLION * (main_end.tv_sec - main_start.tv_sec) + main_end.tv_nsec - main_start.tv_nsec);
-	long unsigned read_bytes = (long unsigned)num_send_request*send_message_size * total_flows ;
+	uint64_t read_bytes=0;
+	for(i=0;i<num_threads;i++){
+		read_bytes += multi_ctx[i]->recv_bytes;
+	}
 	double bandwidth =  read_bytes *8.0/ diff0;
 
 	printf("- [%.9g, %lu, %.9g, %d]\n", diff0/BILLION, read_bytes, bandwidth, total_flows);

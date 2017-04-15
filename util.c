@@ -18,6 +18,11 @@ void bindingCPU(int num){
 	}
 
 }
+double get_nsecs(struct timespec time)
+{
+	return (time.tv_sec * BILLION) + (time.tv_nsec);
+}
+
 
 void die(const char *reason)
 {
