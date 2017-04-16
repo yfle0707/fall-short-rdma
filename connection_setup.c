@@ -46,7 +46,7 @@ void *run_rone_server(void *arg);
 
 int send_message_size = 2048;
 int num_send_request =1;
-int signaled=0;
+int signaled=1;
 //int cpu_id=0;
 int portno=55281;
 int internal_port_no = 66889;
@@ -54,7 +54,7 @@ int is_client=0;
 int event_mode = 0;
 int duration=0;
 int num_threads=1;
-int queue_depth=1024;
+int queue_depth=16;
 
 int is_sync=0;
 int rate_limit_mode=1;
@@ -423,7 +423,12 @@ void RunMain(void *arg){
 //		printf("queue pair connection time %llu us\n", diff / 1000);
 		qp_transition[s_ctx->core][i] = diff / 1000;
 #endif
-		on_write_read(s_ctx,s_ctx->conns[i],1, OPERATOR, COMMON_ROCE);
+		int count = 0;
+		while(count < queue_depth && count < s_ctx->conns[i]->num_requests){
+			on_write_read(s_ctx,s_ctx->conns[i],1, OPERATOR, COMMON_ROCE);
+			count++;
+		}
+		//printf("count %d\n", count);
 	}
 	struct timespec start, end;
 	long long unsigned diff;
@@ -433,20 +438,20 @@ void RunMain(void *arg){
 
 	s_ctx->nr_completes = s_ctx->nr_errors = 0;		
 	while(!done[index]){
-		void *ev_ctx;
-		struct ibv_cq *cq;
+		//void *ev_ctx;
+		//struct ibv_cq *cq;
 		int polling_size = queue_depth;
 		struct ibv_exp_wc wc[polling_size];
 		int k=0;
 		int ack_i;
 		do{
-			if(event_mode == 1 || is_client == 0){
+			/*if(event_mode == 1 || is_client == 0){
 				TEST_NZ(ibv_get_cq_event(s_ctx->send_comp_channel, &cq, &ev_ctx));
 				ibv_ack_cq_events(cq, polling_size);
 				TEST_NZ(ibv_req_notify_cq(cq, 0));
 				k = ibv_exp_poll_cq(cq, polling_size, wc, sizeof(wc[0]));
-			}else
-				k = ibv_exp_poll_cq(s_ctx->send_cq, queue_depth, wc, sizeof(wc[0]));
+			}else*/
+				k = ibv_exp_poll_cq(s_ctx->send_cq, polling_size, wc, sizeof(wc[0]));
 		}while(k<=0);
 		//printf("core %d, receive %d\n", index, k);
 		for(ack_i=0; ack_i< k; ack_i++){
@@ -465,11 +470,10 @@ void RunMain(void *arg){
 			//printf("flow id %d at core %d, sendcount %d\n", conn->flowid, index, conn->num_sendcount);
 			if(conn->num_sendcount == conn->num_requests)
 				s_ctx->nr_completes++;
-			else
+			else if ((conn->num_sendcount + queue_depth) <= conn->num_requests)
 				on_write_read(s_ctx, conn, 1, OPERATOR, COMMON_ROCE);
 		}
 		if(s_ctx->nr_conns == (s_ctx->nr_completes+s_ctx->nr_errors)){
-
 			clock_gettime(CLOCK_MONOTONIC, &end);
 			double tot_time = (double)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
 			long unsigned read_bytes = 0;
@@ -479,9 +483,6 @@ void RunMain(void *arg){
 			s_ctx->recv_bytes = read_bytes;
 			double bandwidth = read_bytes * 8.0/tot_time;
 			printf("- [%.9g, %lu, %.9g, %d, %d]\n", tot_time / BILLION,read_bytes, bandwidth, s_ctx->nr_completes, s_ctx->nr_errors);
-
-
-			
 			done[index] = TRUE;
 		}
 	}

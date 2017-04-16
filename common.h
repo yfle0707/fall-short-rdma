@@ -32,7 +32,7 @@
 #define ADD_SIZE 0
 #define COMMON_ROCE 0
 #define COMMON_RONE 1
-#define MAX_CONNECTIONS 1024
+#define MAX_CONNECTIONS 1000 
 
 // Compare, print, and exit
 #define CPE(val, msg, err_code) \

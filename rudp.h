@@ -51,7 +51,7 @@
 #define USEC_IN_SEC                     1000000
 
 #define	MAXLINE		4096	/* max text line length */
-#define MAX_SEND_WR     8196	
+#define MAX_SEND_WR     4096	
 #define BILLION 	1000000000L
 #define NIC_CLOCK_MHZ 	317
 #define MAX_32BIT_NUM   4294967295
