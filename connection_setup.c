@@ -542,13 +542,15 @@ int main(int argc, char **argv)
 	clock_gettime(CLOCK_MONOTONIC, &main_end);
 	double diff0 = (double)(BILLION * (main_end.tv_sec - main_start.tv_sec) + main_end.tv_nsec - main_start.tv_nsec);
 	uint64_t read_bytes=0;
+	int errs = 0;
 	for(i=0;i<num_threads;i++){
 		read_bytes += multi_ctx[i]->recv_bytes;
+		errs += multi_ctx[i]->nr_errors;
 	}
 	double bandwidth =  read_bytes *8.0/ diff0;
 
-	printf("- [%.9g, %lu, %.9g, %d]\n", diff0/BILLION, read_bytes, bandwidth, total_flows);
-	//PrintConnection();
+	printf("- [%.9g, %lu, %.9g, %d, %d]\n", diff0/BILLION, read_bytes, bandwidth, total_flows, errs);
+	PrintConnection();
 	for(i=0;i<num_threads;i++)
 		on_disconnect(multi_ctx[i]);
 	
@@ -752,7 +754,7 @@ void run_client(int portno, char *hostname, struct connection *conn){
 			server->h_length);
 	serv_addr.sin_port = htons(portno);
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
-		die("ERROR connecting");
+		CPE(1,"ERROR connecting", portno);
 
 	conn->remote_qp_attr = (struct qp_attr *)malloc(sizeof(struct qp_attr));
 	memset(conn->remote_qp_attr, 0, S_QPA);
