@@ -21,12 +21,38 @@
 
 
 #define WRITE_BUF_SIZE 128	/* Per-connection internal buffer size for writes. */
-#define READ_BUF_SIZE (1<<25) /* Read buffer size. 32MB. */
+#define READ_BUF_SIZE (1<<20) /* Read buffer size. 32MB. */
 #define MAXEVENTS 1024  /* Maximum number of epoll events per call */
 #define MAX_CPUS 8
-static uint8_t read_buf[READ_BUF_SIZE];
+#define INIT_CONNECT_MEASURE
+
+
 
 int startSecs = 0;
+pthread_t latency_threads[MAX_CPUS];
+char *hosts[MAX_CPUS]={NULL};
+int total_flows;
+static int flows[MAX_CPUS];
+static int done[MAX_CPUS];
+static int connection_create[MAX_CPUS][1000];
+
+
+int send_message_size = 1024;
+int num_send_request =1;
+int window_size= 1;
+int signaled=0;
+//int cpu_id=0;
+int portno=55281;
+int internal_port_no = 66889;
+int is_client=0;
+int event_mode = 0;
+int duration=0;
+int num_threads=1;
+int queue_depth=16;
+int is_sync=0;
+int rate_limit_mode=1;
+long long unsigned syntime;
+
 
 /*
  * Data structure to keep track of server connection state.
@@ -44,7 +70,7 @@ struct conn {
 	/* Internal buffer to temporarily store the contents of a read. */
 	char buffer[WRITE_BUF_SIZE];	
 	/* Size of the data stored in the buffer. */
-	size_t size;			
+	//size_t size;			
 	/* The incast that this connection is a part of. */
 	struct incast *incast;
 
@@ -91,6 +117,7 @@ struct incast {
 	/* The number of completed requests so far. */
 	uint32_t completed;
 	
+	uint8_t read_buf[READ_BUF_SIZE];
 	int core;
 	/* Doubly-linked list of active server connection objects. */
 	struct conn *conn_head;
@@ -110,31 +137,10 @@ struct incast {
 /* Set verbosity to 1 for debugging. */
 static int verbose = 0;
 
-pthread_t latency_threads[MAX_CPUS];
-char *hosts[MAX_CPUS]={NULL};
-int total_flows;
-static int flows[MAX_CPUS];
-static int done[MAX_CPUS];
+struct incast *multi_incasts[MAX_CPUS];
+struct timespec main_start, main_end;
 
-
-
-int send_message_size = 2048;
-int num_send_request =1;
-int window_size= 1;
-int signaled=0;
-//int cpu_id=0;
-int portno=55281;
-int internal_port_no = 66889;
-int is_client=0;
-int event_mode = 0;
-int duration=0;
-int num_threads=1;
-int queue_depth=16;
-int is_sync=0;
-int rate_limit_mode=1;
-long long unsigned syntime;
-
-
+struct hostent *hp;
 /* Local function definitions. */
 static void increment_and_check_incast(struct incast *inc);
 
@@ -142,7 +148,6 @@ double get_secs(struct timespec time)
 {
 	return (time.tv_sec) + (time.tv_nsec * 1e-9);
 }
-
 double get_secs_since_start(struct timespec time, long startsecs)
 {
 	return get_secs(time) - startsecs;
@@ -157,7 +162,6 @@ double get_secs_since_start(struct timespec time, long startsecs)
 int open_server(char *hostname, int port) 
 {
 	int serverfd;
-	struct hostent *hp;
 	struct sockaddr_in serveraddr;
 	int opts = 0;
 	int optval = 1;
@@ -182,10 +186,10 @@ int open_server(char *hostname, int port)
 		printf("setsockopt error.\n");
 		exit(-1);
 	}
-
-	/* Fill in the server's IP address and port */
-	if ((hp = gethostbyname(hostname)) == NULL)
-		return -2; /* check h_errno for cause of error */
+	/*else{
+	
+		printf("%s\n", (char *)hp->h_name);
+	}*/
 	bzero((char *) &serveraddr, sizeof(serveraddr));
 	serveraddr.sin_family = AF_INET;
 	bcopy((char *)hp->h_addr, 
@@ -218,6 +222,12 @@ int open_server(char *hostname, int port)
 	static void
 add_conn_list(struct conn *c, struct incast *i)
 {
+	if(c == NULL || i == NULL )
+		printf("NULL in \n");
+	if( i->conn_head == NULL )
+		printf("NULL conn_head\n");
+	if( i->conn_head->next == NULL)
+		printf("i->conn_head->next\n");
 	c->next = i->conn_head->next;
 	c->prev = i->conn_head;
 	i->conn_head->next->prev = c;
@@ -250,9 +260,10 @@ void remove_connection(struct conn *c){
 
 	/* Stop Timing and Log. */
 	XCLOCK_GETTIME(&c->finish);
-	double tot_time = get_secs(c->finish) - get_secs(c->start);
-	double bandwidth = (c->read_bytes * 8.0 )/(1024.0 * 1024.0 * 1024.0 * tot_time);
+	double tot_time = get_nsecs(c->finish) - get_nsecs(c->start);
+	double bandwidth = (c->read_bytes * 8.0 )/(tot_time);
 	//printf("- [%.9g, %lu, %.9g, 1]\n", tot_time, c->read_bytes, bandwidth);
+//	printf("- [%.9g, %lu, %.9g, %d]\n", tot_time / 1000, c->read_bytes, bandwidth, c->fd);
 
 	/* Error Checking. */
 	if (c->read_bytes != c->request_bytes) {
@@ -307,16 +318,18 @@ add_server(int connfd, struct timespec start, struct incast *inc)
 	struct epoll_event event;
 
 	/* Allocate a new connection object. */
-	new_conn = Malloc(sizeof(struct conn));
-
+	new_conn =(struct conn*) Malloc(sizeof(struct conn));
+		
+	//printf("add_server done %d, %d\n", connfd, inc->core);
 	new_conn->fd = connfd;
-	new_conn->size = 0;
+	//new_conn->size = 0;
 	new_conn->incast = inc;
 
 	/* No bytes have been requested or written yet. */
 	new_conn->request_bytes = 0;
 	new_conn->read_bytes = 0;
 
+	//printf("1add_server done %d, %d\n", connfd, inc->core);
 	/* Add this descriptor to the write descriptor set. */
 	event.data.fd = connfd;
 	event.data.ptr = new_conn;
@@ -328,7 +341,9 @@ add_server(int connfd, struct timespec start, struct incast *inc)
 
 	new_conn->start = start;
 
+	//printf("2add_server done %d, %d\n", connfd, inc->core);
 	add_conn_list(new_conn, inc);
+	//printf("0add_server done %d, %d\n", connfd, inc->core);
 }
 
 /* 
@@ -342,7 +357,7 @@ add_server(int connfd, struct timespec start, struct incast *inc)
  * descriptor to be non-blocking. Adds the server to the connection pool.
  */
 	static void
-start_new_connection(char *hostname, int port, struct incast *inc)
+start_new_connection(char *hostname, int port, struct incast *inc, int j)
 {
 	int connfd;
 	struct timespec start;
@@ -353,6 +368,7 @@ start_new_connection(char *hostname, int port, struct incast *inc)
 
 	/* Accept the new connection. */
 	connfd = open_server(hostname, port);
+	
 	if (connfd < 0) {
 		printf("# Unable to open connection to (%s, %d)\n", hostname, port);
 		return;
@@ -394,6 +410,7 @@ alloc_incast(uint64_t sru, uint32_t nflows, uint32_t numreqs)
 	inc->completed = 0;
 	inc->nflows = nflows; 
 	inc->nr_conns = 0;
+	memset(inc->read_buf, 0, sizeof(inc->read_buf));
 	/* Allocate and initialize the dummy connection head. */
 	inc->conn_head = Malloc(sizeof(struct conn));
 	inc->conn_head->next = inc->conn_head;
@@ -419,6 +436,7 @@ free_incast(struct incast *inc)
 		printf("Freeing incast\n");
 
 	Free(inc->conn_head);
+	//Free(inc->read_buf);
 	Free(inc);
 //	exit(0);
 	return ;
@@ -458,7 +476,9 @@ start_incast(uint64_t sru, uint32_t nflows, char *hostname, int port, struct inc
 
 	int j;
 	/* Alloc the incast and add it to the incast_pool */
-	inc = alloc_incast(sru, nflows, num_send_request);
+	inc = alloc_incast((uint64_t)sru*num_send_request, nflows, 1);
+//	printf("index %d, nflows %d\n", index,nflows);
+	multi_incasts[index] = inc;
 	inc->core = index;
 	inc->epool = p;
 	//p->nr_incasts++;
@@ -466,8 +486,22 @@ start_incast(uint64_t sru, uint32_t nflows, char *hostname, int port, struct inc
 	/* Connect to the servers */
 	if (verbose)
 		printf("Starting new connection to (%s %d)...\n", hostname, port);
-	for(j=0;j<nflows;j++)
-		start_new_connection(hostname, port, inc);
+	for(j=0;j<nflows;j++){
+#ifdef INIT_CONNECT_MEASURE
+	        struct timespec start, end;
+        	long long unsigned diff;
+		clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
+		//printf("add flow %d, at core %d\n",  j, index);
+		start_new_connection(hostname, port, inc, j);
+#ifdef INIT_CONNECT_MEASURE
+		clock_gettime(CLOCK_MONOTONIC, &end);
+		diff = (long long unsigned)(BILLION * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec);
+		//printf("index %d, %dth flow, %llu us\n",index, j,diff / 1000);
+		connection_create[index][j] = diff /1000;
+#endif
+
+	}
 }
 
 /* 
@@ -503,7 +537,7 @@ finish_incast(struct incast *inc)
 	printf("- [%.9g, %lu, %.9g, %d]\n", tot_time, inc->sru * inc->numreqs *inc->nflows, bandwidth, inc->nflows);
 	done[inc->core] = TRUE;
 	/* Free the incast. */
-	free_incast(inc);
+	//free_incast(inc);
 }
 
 /* 
@@ -567,7 +601,7 @@ read_message(struct conn *c, struct incast_pool *p)
 	int n;
 
 	/* Read from that socket. */
-	n = recv(c->fd, read_buf, READ_BUF_SIZE, 0);
+	n = recv(c->fd, c->incast->read_buf, READ_BUF_SIZE, 0);
 
 	/* Data read. */
 	if (n > 0) {
@@ -617,6 +651,7 @@ write_message(struct conn *c, struct incast_pool *p)
 	uint64_t sru, net_sru;
 	struct epoll_event event;
 
+//	printf("write_message %"PRIu64"\n", c->incast->sru);
 	/* Perform the write system call. */
 	sru = c->incast->sru;
 	net_sru = htobe64(sru);
@@ -738,13 +773,13 @@ void parseOpt(int argc, char **argv){
                 printf("please only specify one parameter, either num_requests or duration\n");
                 exit(-1);
         }
-        if(is_client == 1 && num_threads > i){
+       /* if(is_client == 1 && num_threads > i){
                 printf("thread number is larger than server number!!\n");
                 exit(-1);
-        }
+        }*/
 }
 
-void RunMain(void *arg){
+void *RunMain(void *arg){
 	struct incast_pool pool;
 	struct conn *connp;
 	int i;
@@ -754,11 +789,15 @@ void RunMain(void *arg){
 	/* Initialize the connection pool. */
 	init_pool(&pool);
 
-	printf("flows %d on core %d\n",flows[index], index);
+	//printf("flows %d on core %d\n",flows[index], index);
 	/* Start an incast. */
-	start_incast(send_message_size, flows[index], hosts[0], portno, &pool, index);
+	start_incast(send_message_size, flows[index], hosts[0], portno+index, &pool, index);
+	if(get_nsecs(main_start) == 0)
+		XCLOCK_GETTIME(&main_start);
 
-	printf("- [totTime, totBytes, bandwidthGbps, numSockets]\n");
+
+
+	//printf("- [totTime, totBytes, bandwidthGbps, numSockets]\n");
 	while(!done[index])
 	{ 
 		/* 
@@ -774,7 +813,7 @@ void RunMain(void *arg){
 				fprintf (stderr, "epoll error\n");
 				perror("");
 				close (pool.events[i].data.fd);
-				continue;
+				exit(-1);
 			}
 
 			/* Handle Reads. */
@@ -791,8 +830,23 @@ void RunMain(void *arg){
 		}
 	}
 
-	return (0);
+	return; 
 }
+
+void PrintConnection(){
+        int core=0, i=0;
+        printf("connection:\n");
+        for(core=0; core< num_threads; core++){
+                for (i=0;i<flows[core];i++){
+                        //if(connection_create[core][i] == 0)
+                        //      break;
+                        printf("- [%d, %llu]\n", core, connection_create[core][i]);
+                }
+        }
+
+
+}
+
 
 
 int main(int argc, char **argv) 
@@ -803,7 +857,16 @@ int main(int argc, char **argv)
 	/* initialize random() */
 	srandom(time(0));
         parseOpt(argc,argv);
+	hp = gethostbyname(hosts[0]);
+	/* Fill in the server's IP address and port */
+	if (hp == NULL || hp->h_addr_list[0] == NULL){
+		
+		printf("hp is null\n");
+		//return -2; /* check h_errno for cause of error */
+		exit(-1);
+	}
 
+	//printf("latency:\n");
         int flow_per_thread = total_flows / num_threads;
         int flow_remainder_cnt = total_flows % num_threads;
         for (i = 0; i < num_threads; i++) {
@@ -830,6 +893,16 @@ int main(int argc, char **argv)
                 if(pthread_join(latency_threads[i], NULL) !=0 )
                         die("main(): Join failed for worker thread i");
 
+	/* Stop Timing and Log. */
+	XCLOCK_GETTIME(&main_end);
+	double tot_time = get_secs(main_end) - get_secs(main_start);
+	long long unsigned bytes=(long long unsigned) send_message_size * num_send_request * total_flows; 
+	double bandwidth =(double) (bytes*8.0)/(1024.0 * 1024.0 * 1024.0 * tot_time);
+	printf("- [%.9g, %lu, %.9g, %d]\n", tot_time, bytes, bandwidth, total_flows);
 
+	for(i=0;i<num_threads;i++)
+		free(multi_incasts[i]);
+	
+//	PrintConnection();	
 
 }
