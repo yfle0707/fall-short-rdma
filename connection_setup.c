@@ -502,6 +502,7 @@ int main(int argc, char **argv)
 	struct ibv_device **dev_list = ibv_get_device_list(NULL) ;
 	ib_dev = dev_list[0];
 
+	printf("tput:\n");
 	int i;
         int flow_per_thread = total_flows / num_threads;
         int flow_remainder_cnt = total_flows % num_threads;
