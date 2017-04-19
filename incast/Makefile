@@ -5,7 +5,7 @@ LDFLAGS := ${LDFLAGS} -lrdmacm -libverbs -lrt -lpthread -lm
 
 all: incast_server incast_client 
 
-incast_server: incast_server.o csapp.o
+incast_server: incast_server.o ../util.o csapp.o
 	${LD} -o $@ $^ ${LDFLAGS}
 incast_client: incast_client.o ../util.o csapp.o 
 	${LD} -o $@ $^ ${LDFLAGS}
