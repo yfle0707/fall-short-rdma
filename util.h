@@ -13,7 +13,7 @@
 #endif
 
 #define BILLION 1000000000L
-#define MAX_CPUS 8
+#define MAX_CPUS 16
 void bindingCPU(int num);
 void die(const char *reason);
 double get_nsecs(struct timespec time);

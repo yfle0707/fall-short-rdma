@@ -23,7 +23,6 @@
 #define WRITE_BUF_SIZE 128	/* Per-connection internal buffer size for writes. */
 #define READ_BUF_SIZE (1<<20) /* Read buffer size. 32MB. */
 #define MAXEVENTS 1024  /* Maximum number of epoll events per call */
-#define MAX_CPUS 8
 #define INIT_CONNECT_MEASURE
 
 
